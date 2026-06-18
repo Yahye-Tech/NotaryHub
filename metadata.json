@@ -1,0 +1,6 @@
+{
+  "name": "HubDev",
+  "description": "An enterprise-grade multi-tenant SaaS application (HubDev) featuring isolated tenant notary offices, cryptographic digital vaults, role-agnostic IAM gateways, and real-time ledger verification nodes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
