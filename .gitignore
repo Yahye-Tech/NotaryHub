@@ -1,8 +1,21 @@
+# Dependencies
 node_modules/
-build/
+
+# Environment (contains secrets)
+.env
+.env.local
+.env.*.local
+
+# Build output
 dist/
-coverage/
-.DS_Store
+
+# Scratch / temp files
+server.ts.bak
+test_db.ts
+/tmp/
+
+# Logs
 *.log
-.env*
-!.env.example
+
+# OS
+.DS_Store
