@@ -16,6 +16,7 @@ import { initEmailService } from "./src/services/email.service.js";
 
 // ─── Auth routes ──────────────────────────────────────────────────────────
 import authRoutes from "./src/routes/auth.routes.js";
+import tenantRoutes from "./src/routes/tenant.routes.js";
 
 // ─── RBAC middleware (for protecting existing routes) ─────────────────────
 import { requireAuth, requireMinRole } from "./src/middleware/auth.middleware.js";
@@ -58,6 +59,9 @@ app.get("/api/health", async (_req, res) => {
 
 // ─── Auth routes (public) ─────────────────────────────────────────────────
 app.use("/api/auth", authRoutes);
+
+// ─── Tenant / Branch / Employee routes (protected) ───────────────────────
+app.use("/api/tenants", tenantRoutes);
 
 // ─── Gemini AI client ─────────────────────────────────────────────────────
 const ai = new GoogleGenAI({
