@@ -1,3 +1,5 @@
+type Invoice = { id: string; invoiceNumber?: string; customerName: string; amount: number; dueDate: string; status: string; items?: { description: string; price: number }[] };
+
 import React, { useState } from "react";
 import { 
   Users, Search, UserPlus, CheckCircle2, FileText, 
@@ -23,77 +25,7 @@ export interface Customer {
 export default function CompanyAdminCustomers() {
   
   // Initial rich mock customer database state
-  const [customers, setCustomers] = useState<Customer[]>([
-    {
-      id: "cust-01",
-      name: "Ahmed Ali",
-      phone: "+252 90 779 1111",
-      nationalId: "NID-8942-A83B",
-      email: "ahmed.ali@bosaso-trading.so",
-      fingerprintStatus: "enrolled",
-      fingerprintHash: "FP-MINUTIAE-8BE4A9F202B1D",
-      signatureImg: "https://upload.wikimedia.org/wikipedia/commons/3/3a/Jon_Foreman_Signature.png",
-      branchesVisited: ["Bosaso Main Branch"],
-      documentsCount: 8,
-      appointmentsCount: 2,
-      paymentsCount: 5,
-      history: [
-        { date: "2026-06-11", action: "Signed General Power of Attorney", branch: "Bosaso Main Branch" },
-        { date: "2026-06-10", action: "Completed Fingerprint Biometric Enrollment", branch: "Bosaso Main Branch" },
-        { date: "2026-06-08", action: "Paid Notarization Invoice $150.00", branch: "Bosaso Main Branch" }
-      ]
-    },
-    {
-      id: "cust-02",
-      name: "Fartun Farah",
-      phone: "+252 90 779 2222",
-      nationalId: "NID-1049-C234",
-      email: "fartun.farah@garowe-corp.so",
-      fingerprintStatus: "enrolled",
-      fingerprintHash: "FP-MINUTIAE-7FE3A5D4034AA",
-      signatureImg: "https://upload.wikimedia.org/wikipedia/commons/e/ec/Signature_of_Raffaele_Guglielmi.png",
-      branchesVisited: ["Garowe Corporate Office", "Bosaso Main Branch"],
-      documentsCount: 4,
-      appointmentsCount: 1,
-      paymentsCount: 3,
-      history: [
-        { date: "2026-06-09", action: "Approved Custom Agreement doc draft", branch: "Garowe Corporate Office" },
-        { date: "2026-06-05", action: "Completed Passport photo visual confirmation", branch: "Garowe Corporate Office" }
-      ]
-    },
-    {
-      id: "cust-03",
-      name: "Arthur Pendelton",
-      phone: "+1 215 555 0192",
-      nationalId: "NID-9923-US89",
-      email: "arthur@pendelton-legal.org",
-      fingerprintStatus: "enrolled",
-      fingerprintHash: "FP-MINUTIAE-9AC3D2319F4",
-      branchesVisited: ["Bosaso Main Branch"],
-      documentsCount: 5,
-      appointmentsCount: 3,
-      paymentsCount: 2,
-      history: [
-        { date: "2026-06-12", action: "Requested Escrow Verification Flow", branch: "Bosaso Main Branch" },
-        { date: "2026-06-02", action: "Registered as Corporate legal proxy", branch: "Bosaso Main Branch" }
-      ]
-    },
-    {
-      id: "cust-04",
-      name: "Alexander Westmoreland",
-      phone: "+1 610 555 3821",
-      nationalId: "NID-4831-US55",
-      email: "alex@westmoreland-holdings.co",
-      fingerprintStatus: "pending",
-      branchesVisited: ["Bosaso Main Branch"],
-      documentsCount: 2,
-      appointmentsCount: 2,
-      paymentsCount: 1,
-      history: [
-        { date: "2026-06-12", action: "Completed OCR Passport Scan automatic validation", branch: "Bosaso Main Branch" }
-      ]
-    }
-  ]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
 
   // Search filter
   const [searchTerm, setSearchTerm] = useState("");

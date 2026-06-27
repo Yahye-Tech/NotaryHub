@@ -1,61 +1,16 @@
+type Invoice = { id: string; invoiceNumber?: string; customerName: string; amount: number; dueDate: string; status: string; items?: { description: string; price: number }[] };
+
 import React, { useState } from "react";
 import { 
   TrendingUp, CreditCard, Landmark, DollarSign, 
   Receipt, ArrowUpRight, CheckCircle2, ShieldCheck, RefreshCw 
 } from "lucide-react";
-import { Invoice } from "../../types";
+import {} from "../../types";
 
 export default function CompanyAdminBilling() {
   
   // High fidelity business invoices list
-  const [invoices, setInvoices] = useState<Invoice[]>([
-    {
-      id: "inv-201",
-      invoiceNumber: "INV-229104",
-      customerName: "Ahmed Ali",
-      amount: 150.00,
-      dueDate: "2026-06-25",
-      status: "paid",
-      items: [
-        { description: "General Power of Attorney Notarization", price: 100 },
-        { description: "Biometric Fingerprint Minutiae Stamp Duty", price: 50 }
-      ]
-    },
-    {
-      id: "inv-202",
-      invoiceNumber: "INV-229105",
-      customerName: "Fartun Farah",
-      amount: 80.00,
-      dueDate: "2026-06-20",
-      status: "paid",
-      items: [
-        { description: "Custom Declaration Deed Verification", price: 80 }
-      ]
-    },
-    {
-      id: "inv-203",
-      invoiceNumber: "INV-229106",
-      customerName: "Arthur Pendelton",
-      amount: 250.00,
-      dueDate: "2026-06-28",
-      status: "unpaid",
-      items: [
-        { description: "Escrow Contract Notarization Draft", price: 150 },
-        { description: "Special Witness Board Registration Fee", price: 100 }
-      ]
-    },
-    {
-      id: "inv-204",
-      invoiceNumber: "INV-229107",
-      customerName: "Alexander Westmoreland",
-      amount: 120.00,
-      dueDate: "2026-06-02",
-      status: "overdue",
-      items: [
-        { description: "Affidavit of Identity Verification Flow", price: 120 }
-      ]
-    }
-  ]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
 
   const [filter, setFilter] = useState<string>("all");
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(invoices[0]);

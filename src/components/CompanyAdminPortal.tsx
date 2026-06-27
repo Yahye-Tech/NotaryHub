@@ -7,7 +7,7 @@ import {
   LayoutDashboard, UserCheck, ShieldAlert, LogOut, Menu, X,
   Trash2, Edit, Edit3, Archive, KeyRound, Play, Plus, Clock, Shield, Sun, Moon
 } from "lucide-react";
-import { Tenant, Branch, Employee, Invoice, Appointment, QueueTicket, NotaryDocument, AuditLog } from "../types";
+import { Tenant, Branch, Employee, QueueTicket, NotaryDocument, AuditLog } from "../types";
 
 // Import custom extracted sub-components
 import CompanyAdminDashboard from "./company/CompanyAdminDashboard";
@@ -26,16 +26,16 @@ interface CompanyAdminPortalProps {
   onDeleteBranch: (branchId: string) => void;
   onToggleArchiveBranch: (branchId: string) => void;
   employees: Employee[];
-  onAddEmployee: (branchId: string, name: string, email: string, role: Employee["role"]) => void;
-  onEditEmployee: (empId: string, name: string, email: string, role: Employee["role"], branchId: string) => void;
+  onAddEmployee: (branchId: string, name: string, email: string, role: Employee["job_role"]) => void;
+  onEditEmployee: (empId: string, name: string, email: string, role: Employee["job_role"], branchId: string) => void;
   onDeleteEmployee: (empId: string) => void;
   onToggleArchiveEmployee: (empId: string) => void;
   onToggleEmployeeStatus: (id: string) => void;
   onToggleEmployeeSuspend: (id: string) => void;
   onResetEmployeePassword: (id: string) => void;
-  invoices: Invoice[];
+  invoices: never[];
   onPayInvoice: (id: string) => void;
-  appointments: Appointment[];
+  appointments: never[];
   queue: QueueTicket[];
   documents: NotaryDocument[];
   lockTenant?: boolean;
@@ -115,9 +115,9 @@ export default function CompanyAdminPortal({
 
   const [empName, setEmpName] = useState("");
   const [empEmail, setEmpEmail] = useState("");
-  const [empRole, setEmpRole] = useState<Employee["role"]>("NOTARY_OFFICER");
+  const [empRole, setEmpRole] = useState<Employee["job_role"]>("NOTARY_OFFICER");
   const [empSpecificRole, setEmpSpecificRole] = useState<string>("Notary Officer");
-  const [empBranchId, setEmpBranchId] = useState(branches[0]?.id || "br-01");
+  const [empBranchId, setEmpBranchId] = useState(branches[0]?.id ?? "");
 
   // Edit Modals and Form States
   const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
@@ -129,7 +129,7 @@ export default function CompanyAdminPortal({
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [editEmpName, setEditEmpName] = useState("");
   const [editEmpEmail, setEditEmpEmail] = useState("");
-  const [editEmpRole, setEditEmpRole] = useState<Employee["role"]>("NOTARY_OFFICER");
+  const [editEmpRole, setEditEmpRole] = useState<Employee["job_role"]>("NOTARY_OFFICER");
   const [editEmpBranchId, setEditEmpBranchId] = useState("");
 
   // Veritas AI Chat State
@@ -155,7 +155,7 @@ export default function CompanyAdminPortal({
   useEffect(() => {
     setLocalEmployees(employees);
     if (employees.length > 0 && !empBranchId) {
-      setEmpBranchId(branches[0]?.id || "br-01");
+      setEmpBranchId(branches[0]?.id ?? "");
     }
   }, [employees, branches]);
 
@@ -892,12 +892,12 @@ export default function CompanyAdminPortal({
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {localEmployees.map(e => {
-                          const associatedBranch = localBranches.find(b => b.id === e.branchId);
+                          const associatedBranch = localBranches.find(b => b.id === e.branch_id);
                           return (
                             <tr key={e.id} className={`hover:bg-slate-50/50 ${e.archived ? "bg-slate-50/30 opacity-70" : ""}`}>
                               <td className="p-4 font-bold text-slate-900">
                                 <div className="flex flex-col">
-                                  <span>{e.name}</span>
+                                  <span>{e.full_name}</span>
                                   {e.archived && <span className="text-[9px] font-mono text-amber-600">[Archived Account]</span>}
                                 </div>
                               </td>
@@ -908,7 +908,7 @@ export default function CompanyAdminPortal({
                                 {associatedBranch?.name || "Unassigned / Floater Office"}
                               </td>
                               <td className="p-4 font-bold font-mono text-indigo-650 text-[10px]">
-                                {e.role === "ADMIN" ? "ROLE_BRANCH_ADMIN" : `ROLE_${e.role}`}
+                                {e.job_role === "ADMIN" ? "ROLE_BRANCH_ADMIN" : `ROLE_${e.job_role}`}
                               </td>
                               <td className="p-4">
                                 <span className={`px-2 py-0.5 rounded-full text-[9px] font-sans font-bold leading-none uppercase ${
@@ -926,10 +926,10 @@ export default function CompanyAdminPortal({
                                   <button
                                     onClick={() => {
                                       setEditingEmployee(e);
-                                      setEditEmpName(e.name);
+                                      setEditEmpName(e.full_name);
                                       setEditEmpEmail(e.email);
-                                      setEditEmpRole(e.role);
-                                      setEditEmpBranchId(e.branchId);
+                                      setEditEmpRole(e.job_role);
+                                      setEditEmpBranchId(e.branch_id);
                                     }}
                                     className="text-[9.5px] bg-slate-100 hover:bg-slate-200 text-slate-700 px-1.5 py-1 rounded font-bold transition"
                                   >
@@ -946,7 +946,7 @@ export default function CompanyAdminPortal({
                                     {e.status === "suspended" ? "Unsuspend" : "Suspend"}
                                   </button>
                                   <button
-                                    onClick={() => handleResetEmployeePasswordLocal(e.id, e.name)}
+                                    onClick={() => handleResetEmployeePasswordLocal(e.id, e.full_name)}
                                     className="text-[9.5px] bg-indigo-50 text-indigo-700 hover:bg-indigo-150 px-1.5 py-1 rounded font-bold transition flex items-center gap-0.5"
                                     title="Regenerate credentials and log reset"
                                   >
@@ -961,7 +961,7 @@ export default function CompanyAdminPortal({
                                   <button
                                     onClick={() => {
                                       if (employeeDeleteConfirmId === e.id) {
-                                        handleDeleteEmployeeLocal(e.id, e.name);
+                                        handleDeleteEmployeeLocal(e.id, e.full_name);
                                         setEmployeeDeleteConfirmId(null);
                                       } else {
                                         setEmployeeDeleteConfirmId(e.id);
@@ -1018,7 +1018,7 @@ export default function CompanyAdminPortal({
                       <label className="block text-[10px] text-slate-500 uppercase font-mono font-bold mb-1">Assign Security Group (RBAC) *</label>
                       <select
                         value={empRole}
-                        onChange={(e) => setEmpRole(e.target.value as Employee["role"])}
+                        onChange={(e) => setEmpRole(e.target.value as Employee["job_role"])}
                         className="w-full bg-white border border-slate-200 p-2 text-xs rounded-lg outline-none cursor-pointer"
                       >
                         <option value="NOTARY_OFFICER">ROLE_NOTARY_OFFICER</option>
@@ -1121,7 +1121,7 @@ export default function CompanyAdminPortal({
                         <label className="block text-[10px] text-slate-400 uppercase font-mono font-bold mb-1">Security Role (RBAC Keys)</label>
                         <select
                           value={editEmpRole}
-                          onChange={(e) => setEditEmpRole(e.target.value as Employee["role"])}
+                          onChange={(e) => setEditEmpRole(e.target.value as Employee["job_role"])}
                           className="w-full bg-white border border-slate-200 p-2.5 rounded-lg outline-none cursor-pointer"
                         >
                           <option value="NOTARY_OFFICER">ROLE_NOTARY_OFFICER</option>
@@ -1209,7 +1209,7 @@ export default function CompanyAdminPortal({
                         <label className="block text-[10px] text-slate-455 uppercase font-mono font-bold mb-1">Assign Security Group (RBAC) *</label>
                         <select
                           value={empRole}
-                          onChange={(e) => setEmpRole(e.target.value as Employee["role"])}
+                          onChange={(e) => setEmpRole(e.target.value as Employee["job_role"])}
                           className="w-full bg-white border border-slate-200 p-2.5 rounded-lg outline-none cursor-pointer font-semibold text-slate-800"
                         >
                           <option value="NOTARY_OFFICER">ROLE_NOTARY_OFFICER</option>
@@ -1354,18 +1354,18 @@ export default function CompanyAdminPortal({
                           <div className="space-y-1">
                             <span className="text-slate-400 text-[10px] flex items-center gap-1 font-sans">
                               <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block" />
-                              {log.timestamp}
+                              {log.created_at}
                             </span>
                             <p className="text-slate-800 text-[11.5px] font-sans">
                               <strong className="text-indigo-650 font-mono text-[10px] uppercase font-bold mr-1.5">[{log.action}]</strong>
-                              {log.details}
+                              {log.action}
                             </p>
                           </div>
                           <div className="text-left sm:text-right shrink-0">
                             <span className="bg-slate-100 text-slate-700 font-sans font-bold px-2 py-0.5 rounded text-[9.5px] uppercase tracking-wider inline-block sm:block">
-                              BY: {log.username}
+                              BY: {(log.meta as any)?.username ?? "system"}
                             </span>
-                            <span className="text-[9px] font-mono text-slate-400 inline-block sm:block mt-0.5">IP: {log.ipAddress || "127.0.0.1"}</span>
+                            <span className="text-[9px] font-mono text-slate-400 inline-block sm:block mt-0.5">IP: {log.ip_address || "127.0.0.1"}</span>
                           </div>
                         </div>
                       ))

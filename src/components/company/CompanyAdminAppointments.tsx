@@ -1,9 +1,11 @@
+type Appointment = { id: string; customerName: string; serviceType: string; appointmentTime: string; status: string; branchId?: string; customerEmail?: string };
+
 import React, { useState } from "react";
 import { 
   Calendar, Clock, Search, BookOpen, UserCheck, 
   Trash2, Plus, CheckCircle, MapPin 
 } from "lucide-react";
-import { Appointment, Branch } from "../../types";
+import {Branch} from "../../types";
 
 interface CompanyAdminAppointmentsProps {
   branches: Branch[];
@@ -51,7 +53,7 @@ export default function CompanyAdminAppointments({ branches }: CompanyAdminAppoi
   const [custName, setCustName] = useState("");
   const [custEmail, setCustEmail] = useState("");
   const [servType, setServType] = useState("Power of Attorney");
-  const [selectedBranchId, setSelectedBranchId] = useState(branches[0]?.id || "br-01");
+  const [selectedBranchId, setSelectedBranchId] = useState(branches[0]?.id ?? "");
   const [appDate, setAppDate] = useState("2026-06-15");
   const [appTime, setAppTime] = useState("10:00 AM");
 
@@ -163,7 +165,7 @@ export default function CompanyAdminAppointments({ branches }: CompanyAdminAppoi
                           <span className={`px-2 py-0.5 rounded-full text-[9px] font-sans font-bold leading-none uppercase ${
                             ap.status === "scheduled" 
                               ? "bg-blue-50 text-blue-700 border border-blue-200" 
-                              : ap.status === "completed" 
+                              : ap.status === "notarised" 
                               ? "bg-emerald-50 text-emerald-700 border border-emerald-250 font-medium" 
                               : "bg-slate-150 text-slate-500 font-medium"
                           }`}>

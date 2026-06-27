@@ -8,8 +8,14 @@ import {
   Briefcase, Zap, Info, Receipt, Bot, Lock, Menu, Sun, Moon
 } from "lucide-react";
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Legend, LineChart, Line } from "recharts";
-import { Tenant, Branch, Employee, Appointment, QueueTicket, NotaryDocument, Invoice, AuditLog, MetricPoint } from "../types";
+import { Tenant, Branch, Employee, QueueTicket, NotaryDocument, AuditLog } from "../types";
 import PermissionsConfig, { PermissionsMatrix } from "./PermissionsConfig";
+
+type Invoice = { id: string; invoiceNumber?: string; customerName: string; amount: number; dueDate: string; status: string; items?: { description: string; price: number }[] };
+type Appointment = { id: string; customerName: string; serviceType: string; appointmentTime: string; status: string };
+type MetricPoint = { label: string; value: number; change: number };
+
+
 
 interface SuperAdminPortalProps {
   tenants: Tenant[];
@@ -80,8 +86,7 @@ export default function SuperAdminPortal({
   // Custom simulation notification alerts
   const [alerts, setAlerts] = useState([
     { id: "a-1", message: "New subscription registration: Somali Legal Solutions", date: "Just now", read: false },
-    { id: "a-2", message: "Stripe payout verified successfully: $4,896.00", date: "2 hours ago", read: false },
-    { id: "a-3", message: "Security Warning: 3 failed compliance attempts from 182.16.89.4", date: "Yesterday", read: true }
+        { id: "a-3", message: "Security Warning: 3 failed compliance attempts from 182.16.89.4", date: "Yesterday", read: true }
   ]);
   const [showNotificationDropdown, setShowNotificationDropdown] = useState(false);
 
@@ -95,9 +100,9 @@ export default function SuperAdminPortal({
 
   // Dynamic system-level analytics catalog prices
   const [plansList, setPlansList] = useState([
-    { code: "Basic", name: "Basic Plan", price: 299, activeCount: 1, revenue: 299, upgradeRate: "4.5%" },
-    { code: "Professional", name: "Professional Suite", price: 799, activeCount: 2, revenue: 1598, upgradeRate: "12.2%" },
-    { code: "Enterprise", name: "Enterprise Dedicated", price: 1999, activeCount: 1, revenue: 1999, upgradeRate: "35.8%" }
+    { code: "Basic", name: "Basic Plan", price: 299, activeCount: 1, revenue: 0, upgradeRate: "4.5%" },
+    { code: "Professional", name: "Professional Suite", price: 799, activeCount: 2, revenue: 0, upgradeRate: "12.2%" },
+    { code: "Enterprise", name: "Enterprise Dedicated", price: 1999, activeCount: 1, revenue: 0, upgradeRate: "35.8%" }
   ]);
 
   // Support ticket system database state
@@ -262,10 +267,10 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
 
   // Inspect variables
   const inspectedCompanyObj = tenants.find(t => t.id === selectedCompanyId);
-  const companyBranchesFiltered = branches.filter(b => b.tenantId === selectedCompanyId);
+  const companyBranchesFiltered = branches.filter(b => b.tenant_id === selectedCompanyId);
   const companyBranchIds = companyBranchesFiltered.map(b => b.id);
-  const companyEmployeesFiltered = employees.filter(e => companyBranchIds.includes(e.branchId));
-  const companyInvoicesFiltered = selectedCompanyId === "ten-01" 
+  const companyEmployeesFiltered = employees.filter(e => companyBranchIds.includes(e.branch_id));
+  const companyInvoicesFiltered = selectedCompanyId === (tenants[0]?.id ?? "") 
     ? invoices 
     : invoices.filter(i => i.customerName.toLowerCase().includes("bosaso") || i.customerName.toLowerCase().includes(inspectedCompanyObj?.name.toLowerCase() || ""));
 
@@ -586,7 +591,7 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
                         </div>
                         <div className="flex justify-between pb-2 border-b border-slate-100">
                           <span className="text-slate-550">Initialization Timestamp:</span>
-                          <span className="font-mono text-slate-800">{inspectedCompanyObj.createdAt}</span>
+                          <span className="font-mono text-slate-800">{inspectedCompanyObj.created_at}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-slate-550">Active Allocated branches count:</span>
@@ -619,7 +624,7 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
                           </div>
                           <div className="text-right font-mono text-[10px] text-slate-400">
                             <div>Tel: {b.phone}</div>
-                            <div className="text-blue-600 font-bold mt-0.5">{b.countersCount} Active Desks</div>
+                            <div className="text-blue-600 font-bold mt-0.5">{b.counters_count} Active Desks</div>
                           </div>
                         </div>
                       ))}
@@ -638,15 +643,15 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
                         <div key={e.id} className="p-3 bg-slate-50 border border-slate-150 rounded-lg flex items-center justify-between text-xs">
                           <div className="flex items-center gap-2">
                             <div className="w-7 h-7 bg-slate-200 text-slate-700 font-bold flex items-center justify-center rounded-full text-xs">
-                              {e.name.charAt(0)}
+                              {e.full_name.charAt(0)}
                             </div>
                             <div>
-                              <span className="font-bold text-slate-900 block">{e.name}</span>
+                              <span className="font-bold text-slate-900 block">{e.full_name}</span>
                               <span className="text-slate-500 text-[10.5px] block">{e.email}</span>
                             </div>
                           </div>
                           <div className="text-right">
-                            <span className="px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-150 rounded-full text-[9px] font-mono font-bold">{e.role}</span>
+                            <span className="px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-150 rounded-full text-[9px] font-mono font-bold">{e.job_role}</span>
                           </div>
                         </div>
                       ))}
@@ -691,7 +696,7 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
                       <div className="flex items-center gap-3 mt-1.5 bg-slate-50 p-3 rounded-lg border border-slate-200">
                         <Database className="w-6 h-6 text-blue-600" />
                         <div>
-                          <span className="text-lg font-bold text-slate-900 font-mono block leading-none">{inspectedCompanyObj.dbSize}</span>
+                          <span className="text-lg font-bold text-slate-900 font-mono block leading-none">{inspectedCompanyObj.stats?.userCount}</span>
                           <span className="text-[10px] text-slate-400 mt-1 block">PostgreSQL Multi-tenant Row boundaries isolated</span>
                         </div>
                       </div>
@@ -744,7 +749,7 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
                       <span className="px-2 py-0.5 bg-blue-500 text-[9px] uppercase font-mono rounded font-bold tracking-wider">Goal Tracker</span>
                       <span className="text-[10px] uppercase font-mono text-slate-400 tracking-wider font-bold">MRR Expansion Milestone</span>
                     </div>
-                    <h3 className="text-base font-bold font-sans">SaaS Platform MRR is at 76.5% of Q2 Goal ($5,000.00 Base Target)</h3>
+                    <h3 className="text-base font-bold font-sans">Platform subscription overview</h3>
                     <p className="text-xs text-slate-300 leading-relaxed max-w-2xl">
                       With Somali Legal Solutions activated, cumulative monthly licensing commitments have expanded the portfolio baseline to <span className="font-mono text-emerald-400 font-bold font-mono">$3,824.00/mo</span>. Upgrade sequences are syncing in Stripe Connect.
                     </p>
@@ -866,8 +871,8 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
                     
                     <div className="space-y-3">
                       {tenants.map((t, idx) => {
-                        const associatedBranches = branches.filter(b => b.tenantId === t.id);
-                        const associatedStaff = employees.filter(emp => associatedBranches.map(b => b.id).includes(emp.branchId));
+                        const associatedBranches = branches.filter(b => b.tenant_id === t.id);
+                        const associatedStaff = employees.filter(emp => associatedBranches.map(b => b.id).includes(emp.branch_id));
                         return (
                           <div key={t.id} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-xl transition border border-transparent hover:border-slate-150">
                             <div className="flex items-center gap-2">
@@ -913,10 +918,10 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
                             <div className="flex-1 leading-tight">
                               <div className="flex justify-between items-baseline gap-1">
                                 <span className="font-bold text-slate-800">{log.action}</span>
-                                <span className="text-[9px] font-mono text-slate-450 shrink-0">{log.timestamp.includes(":") ? log.timestamp : "Just now"}</span>
+                                <span className="text-[9px] font-mono text-slate-450 shrink-0">{log.created_at.includes(":") ? log.created_at : "Just now"}</span>
                               </div>
-                              <p className="text-slate-500 text-[10.5px] mt-0.5">{log.username} accessed module {log.module}</p>
-                              <span className="text-[9px] font-mono bg-slate-100 text-slate-550 px-1.5 py-0.2 rounded mt-1 inline-block">Details: {log.details}</span>
+                              <p className="text-slate-500 text-[10.5px] mt-0.5">{(log.meta as any)?.username} accessed module {log.resource_type}</p>
+                              <span className="text-[9px] font-mono bg-slate-100 text-slate-550 px-1.5 py-0.2 rounded mt-1 inline-block">Details: {log.action}</span>
                             </div>
                           </div>
                         );
@@ -970,8 +975,8 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
                       </thead>
                       <tbody className="divide-y divide-slate-100 whitespace-nowrap">
                         {tenants.map(tenant => {
-                          const associatedBranches = branches.filter(b => b.tenantId === tenant.id);
-                          const associatedStaff = employees.filter(emp => associatedBranches.map(b => b.id).includes(emp.branchId));
+                          const associatedBranches = branches.filter(b => b.tenant_id === tenant.id);
+                          const associatedStaff = employees.filter(emp => associatedBranches.map(b => b.id).includes(emp.branch_id));
                           const baseTierCost = plansList.find(p => p.code === tenant.plan)?.price || 799;
 
                           return (
@@ -1424,7 +1429,7 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
                 <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1">
                   {auditLogs
                     .filter(log => {
-                      if (auditFilterCompany !== "all" && log.tenantId !== auditFilterCompany) return false;
+                      if (auditFilterCompany !== "all" && log.tenant_id !== auditFilterCompany) return false;
                       if (auditFilterSeverity === "high" && (log.action.includes("DELETE") || log.action.includes("STATUS") || log.action.includes("TOGGLE"))) return true;
                       if (auditFilterSeverity === "low" && !(log.action.includes("DELETE") || log.action.includes("STATUS") || log.action.includes("TOGGLE"))) return true;
                       return auditFilterSeverity === "all";
@@ -1433,15 +1438,15 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
                       <div key={log.id || idx} className="bg-white border border-slate-200 p-3 rounded-xl flex flex-col sm:flex-row justify-between gap-3.5 font-mono text-[10.5px]">
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
-                            <span className="text-slate-400">{log.timestamp}</span>
+                            <span className="text-slate-400">{log.created_at}</span>
                             <span className="text-blue-600 font-sans font-bold text-[10px] uppercase bg-blue-50/55 px-1.5 rounded">{log.action}</span>
-                            <span className="text-slate-450">Module: {log.module}</span>
+                            <span className="text-slate-450">Module: {log.resource_type}</span>
                           </div>
-                          <p className="text-slate-800 leading-normal font-sans text-xs">{log.details}</p>
+                          <p className="text-slate-800 leading-normal font-sans text-xs">{log.action}</p>
                         </div>
                         <div className="text-right font-mono text-[9px] text-slate-400 self-center">
-                          <div>Actor: {log.username}</div>
-                          <div>IP: {log.ipAddress}</div>
+                          <div>Actor: {(log.meta as any)?.username}</div>
+                          <div>IP: {log.ip_address}</div>
                         </div>
                       </div>
                     ))}

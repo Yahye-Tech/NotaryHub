@@ -1,3 +1,6 @@
+type Invoice = { id: string; invoiceNumber?: string; customerName: string; amount: number; dueDate: string; status: string; items?: { description: string; price: number }[] };
+type Appointment = { id: string; branchId?: string; customerName: string; serviceType: string; appointmentTime: string; status: string; customerEmail?: string };
+
 import React, { useState, useRef, useEffect } from "react";
 import { 
   User, Calendar, Clock, CreditCard, ShieldCheck, Download, 
@@ -7,14 +10,14 @@ import {
   Send, Smartphone, Check, AlertCircle, Fingerprint, 
   Building, MapPin, ShieldAlert, ArrowRight, Printer, AlertTriangle, CheckSquare, Menu, X, Sun, Moon
 } from "lucide-react";
-import { Branch, Appointment, NotaryDocument, Invoice } from "../types";
+import { Branch, NotaryDocument } from "../types";
 
 interface CustomerPortalProps {
   branches: Branch[];
   appointments: Appointment[];
   onBookAppointment: (branchId: string, name: string, email: string, serviceType: string, time: string) => void;
   documents: NotaryDocument[];
-  invoices: Invoice[];
+  invoices: never[];
   onPayInvoice: (id: string) => void;
   onLogout: () => void;
 }
@@ -132,7 +135,7 @@ export default function CustomerPortal({
   // Booking Flow Steps Context
   const [bookingStep, setBookingStep] = useState(1);
   const [bookingCompany, setBookingCompany] = useState("Veritas Notary Bureau LLC");
-  const [bookingBranchId, setBookingBranchId] = useState(branches[0]?.id || "br-01");
+  const [bookingBranchId, setBookingBranchId] = useState(branches[0]?.id ?? "");
   const [bookingService, setBookingService] = useState("Power of Attorney");
   const [bookingDate, setBookingDate] = useState("2026-06-25");
   const [bookingTime, setBookingTime] = useState("10:00 AM");

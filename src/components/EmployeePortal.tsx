@@ -85,6 +85,7 @@ export default function EmployeePortal({
   const [activeTab, setActiveTab] = useState<
     "dashboard" | "queue" | "appointments" | "customers" | "documents" | "ai-builder" | "biometrics" | "payments" | "ai-assistant" | "settings"
   >("dashboard");
+  const [newDoc, setNewDoc] = useState<{ type: string; principal: string; parties: string; title: string; content: string }>({ type: "", principal: "", parties: "", title: "", content: "" });
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     return localStorage.getItem("portal-theme-employee-portal") === "dark";
   });
@@ -97,53 +98,33 @@ export default function EmployeePortal({
 
   // Local state arrays for CRUD & interaction
   const [customers, setCustomers] = useState([
-    { id: "cust-01", name: "Ahmed Ali", phone: "(312) 555-0144", nationalId: "US-NID-98432101", fingerprintCaptured: true, fingerprintVerified: true, signatureCaptured: true, email: "ahmed.ali@example.com", dob: "1988-04-12", address: "452 Oak Avenue, Chicago IL", visits: 5 },
-    { id: "cust-02", name: "Arthur Pendelton", phone: "(312) 555-0192", nationalId: "US-NID-38290111", fingerprintCaptured: false, fingerprintVerified: false, signatureCaptured: false, email: "arthur@pendelton-legal.org", dob: "1965-11-22", address: "12 Main St, Boston MA", visits: 3 },
-    { id: "cust-03", name: "Alexander Westmoreland", phone: "(617) 555-0192", nationalId: "US-ID-9843102", fingerprintCaptured: true, fingerprintVerified: true, signatureCaptured: true, email: "alex@westmoreland-holdings.co", dob: "1980-01-15", address: "888 Capital Blvd, Capital City", visits: 1 },
-    { id: "cust-04", name: "Alice Cooper", phone: "(312) 555-0811", nationalId: "US-ID-11002233", fingerprintCaptured: false, fingerprintVerified: false, signatureCaptured: true, email: "alice@cooper-corp.com", dob: "1972-02-04", address: "77 Rockstar Rd, Detroit MI", visits: 2 }
   ]);
 
-  const [localDocs, setLocalDocs] = useState<NotaryDocument[]>([
-    { id: "doc-01", title: "General Power of Attorney - Ahmed Ali", status: "completed", parties: ["Ahmed Ali", "Michael Vance"], content: "GENERAL POWER OF ATTORNEY\n\nKNOW ALL MEN BY THESE PRESENTS, that I, Ahmed Ali, do hereby appoint Michael Vance as my true and lawful attorney-in-fact to act in my name, place, and stead in all legal capacities...", createdAt: "2026-06-12", watermarkCode: "VERITAS-SECURE-994112", hash: "8fae639de1044ba902888258e74719ef10c1f202b20468ea9f1311b988f01bde" },
-    { id: "doc-02", title: "Affidavit of Residency - Arthur Pendelton", status: "draft", parties: ["Arthur Pendelton"], content: "AFFIDAVIT OF RESIDENCY\n\nI, Arthur Pendelton, of sound mind, do hereby declare on physical oath that I reside at 12 Main St, Boston MA...", createdAt: "2026-06-12" },
-    { id: "doc-03", title: "Custom Lease Agreement - Alice Cooper", status: "pending-signature", parties: ["Alice Cooper"], content: "LEASE AGREEMENT COVENANT\n\nThis agreement outlines the lease terms of studio spaces under state regulatory guidelines...", createdAt: "2026-06-11" }
-  ]);
+  const [localDocs, setLocalDocs] = useState<NotaryDocument[]>([]);
 
   const [localAppointments, setLocalAppointments] = useState([
-    { id: "ap-01", customerName: "Ahmed Ali", serviceType: "General Power of Attorney", appointmentTime: "2026-06-12 @ 10:15 AM", status: "completed" },
-    { id: "ap-02", customerName: "Arthur Pendelton", serviceType: "Deed Certification", appointmentTime: "2026-06-12 @ 11:30 AM", status: "scheduled" },
-    { id: "ap-03", customerName: "Alice Cooper", serviceType: "Escrow Signing", appointmentTime: "2026-06-12 @ 02:00 PM", status: "scheduled" }
   ]);
 
   const [localQueue, setLocalQueue] = useState<QueueTicket[]>(() => {
     const defaults: QueueTicket[] = [
-      { id: "q-12", ticketNumber: "A-12", customerName: "Ahmed Ali", serviceType: "Power of Attorney", checkInTime: "10:00 AM", status: "serving", calledCounter: 2 },
-      { id: "q-13", ticketNumber: "A-13", customerName: "Arthur Pendelton", serviceType: "Deed Certification", checkInTime: "10:15 AM", status: "waiting" },
-      { id: "q-14", ticketNumber: "A-14", customerName: "Alice Cooper", serviceType: "Escrow Signing", checkInTime: "10:20 AM", status: "waiting" },
-      { id: "q-15", ticketNumber: "A-15", customerName: "Klaus Schmidt", serviceType: "Affidavit", checkInTime: "10:30 AM", status: "waiting" }
     ];
     return defaults;
   });
 
   const [localInvoices, setLocalInvoices] = useState([
-    { id: "inv-01", invoiceNumber: "INV-2026-001", customerName: "Ahmed Ali", amount: 120.00, dueDate: "2026-06-12", status: "paid", items: [{ description: "Power of Attorney drafting", price: 100 }, { description: "Biometric analysis fee", price: 20 }] },
-    { id: "inv-02", invoiceNumber: "INV-2026-002", customerName: "Arthur Pendelton", amount: 150.00, dueDate: "2026-06-25", status: "unpaid", items: [{ description: "Deed Certification Fee", price: 150 }] }
   ]);
 
   const [notifications, setNotifications] = useState([
-    { id: "notif-01", title: "New Appointment", text: "Arthur Pendelton scheduled Deed Certification", time: "10m ago", type: "info" },
-    { id: "notif-02", title: "Queue Alert", text: "Ticket A-13 waiting over 15 minutes", time: "5m ago", type: "warn" },
     { id: "notif-03", title: "Document Approved", text: "Power of Attorney for Ahmed Ali notarized successfully", time: "2m ago", type: "success" }
   ]);
 
   // Form states
-  const [selectedCustId, setSelectedCustId] = useState<string | null>("cust-01");
   const [searchQuery, setSearchQuery] = useState("");
   const [newCust, setNewCust] = useState({ name: "", email: "", phone: "", nationalId: "", address: "", dob: "" });
+  const [selectedCustId, setSelectedCustId] = useState<string | null>(null);
   const [editCustMode, setEditCustMode] = useState<string | null>(null);
 
   // Document creations states
-  const [newDoc, setNewDoc] = useState({ title: "Custom Document Declaration", type: "Power of Attorney", parties: "", content: "I, [Insert Party Name], hereby solemnly swear..." });
   const [editDocId, setEditDocId] = useState<string | null>(null);
   const [editDocContent, setEditDocContent] = useState("");
   const [docSearchQuery, setDocSearchQuery] = useState("");
@@ -156,14 +137,12 @@ export default function EmployeePortal({
 
   // Interactive AI Terminal
   const [aiTerminalPrompt, setAiTerminalPrompt] = useState("");
-  const [aiTerminalLog, setAiTerminalLog] = useState<{ sender: "user" | "ai", msg: string }[]>([
-    { sender: "ai", msg: "Veritas Desk AI Assistant online. Ask me to generate templates, scan customers, summary agreements, or evaluate compliance." }
-  ]);
+  const [aiTerminalLog, setAiTerminalLog] = useState<{ sender: "user" | "ai", msg: string }[]>([]);
   const [aiTerminalLoading, setAiTerminalLoading] = useState(false);
 
   // General state variables
-  const [appForm, setAppForm] = useState({ customerName: "", serviceType: "Power of Attorney", date: "", time: "" });
-  const [invoiceForm, setInvoiceForm] = useState({ customerName: "", amount: "", description: "" });
+  const [appForm, setAppForm] = useState({ customer_name: "", service_type: "Power of Attorney", date: "", time: "" });
+  const [invoiceForm, setInvoiceForm] = useState({ customer_name: "", amount: "", description: "" });
   const [clerkProfile, setClerkProfile] = useState({ name: "Elena Rostova", role: "Clerk Practitioner", email: "e.rostova@veritas.com", avatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=120" });
   const [clerkLanguage, setClerkLanguage] = useState("English (US)");
 
@@ -285,15 +264,32 @@ export default function EmployeePortal({
     e.preventDefault();
     const created: NotaryDocument = {
       id: "doc-" + Date.now(),
-      title: `${newDoc.type} - ${newDoc.parties || "Unnamed Party"}`,
+      tenant_id: "",
+      branch_id: "",
+      customer_id: null,
+      processed_by: null,
+      reviewed_by: null,
+      document_number: `DOC-${Date.now()}`,
+      title: `${(newDoc as any)?.type ?? "Document"} - ${(newDoc as any)?.principal ?? "Unnamed Party"}`,
+      doc_type: "OTHER",
       status: "draft",
-      parties: newDoc.parties.split(",").map(p => p.trim()),
-      content: newDoc.content,
-      createdAt: new Date().toISOString().substring(0, 10)
+      content: (newDoc as any)?.content ?? "",
+      summary: null,
+      jurisdiction: null,
+      language: "en",
+      file_url: null,
+      seal_code: null,
+      ai_generated: false,
+      issued_at: null,
+      expires_at: null,
+      signed_at: null,
+      notarised_at: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      is_deleted: false,
     };
     setLocalDocs(prev => [created, ...prev]);
     addNotification("Document Draft Created", `Draft format saved: "${created.title}".`, "info");
-    setNewDoc({ title: "", type: "Power of Attorney", parties: "", content: "I solemnly declare..." });
   };
 
   const handleEditDocumentSave = () => {
@@ -323,14 +319,14 @@ export default function EmployeePortal({
     e.preventDefault();
     const added = {
       id: "ap-" + Date.now(),
-      customerName: appForm.customerName || "Anonymous Customer",
-      serviceType: appForm.serviceType,
+      customer_name: appForm.customer_name || "Anonymous Customer",
+      service_type: appForm.service_type,
       appointmentTime: `${appForm.date} @ ${appForm.time}`,
       status: "scheduled" as const
     };
     setLocalAppointments(prev => [added, ...prev]);
-    addNotification("Appointment Scheduled", `${added.customerName} set for ${added.appointmentTime}`, "info");
-    setAppForm({ customerName: "", serviceType: "Power of Attorney", date: "", time: "" });
+    addNotification("Appointment Scheduled", `${added.customer_name} set for ${added.appointmentTime}`, "info");
+    setAppForm({ customer_name: "", service_type: "Power of Attorney", date: "", time: "" });
   };
 
   const handleReschedule = (id: string) => {
@@ -341,18 +337,18 @@ export default function EmployeePortal({
     }
   };
 
-  const handleCheckInCustomer = (customerName: string, serviceType: string) => {
+  const handleCheckInCustomer = (customer_name: string, service_type: string) => {
     const queueNo = `A-${Math.floor(16 + Math.random() * 50)}`;
     const newTicket: QueueTicket = {
       id: "q-" + Date.now(),
-      ticketNumber: queueNo,
-      customerName,
-      serviceType,
-      checkInTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      ticket_number: queueNo,
+      customer_name,
+      service_type,
+      check_in_time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       status: "waiting"
     };
     setLocalQueue(prev => [...prev, newTicket]);
-    addNotification("Customer Checked In", `Assigned slot ${queueNo} for ${customerName} on queue monitor.`, "success");
+    addNotification("Customer Checked In", `Assigned slot ${queueNo} for ${customer_name} on queue monitor.`, "success");
     setActiveTab("queue");
   };
 
@@ -363,15 +359,15 @@ export default function EmployeePortal({
     const num = Math.floor(16 + Math.random() * 50);
     const newTicket: QueueTicket = {
       id: "q-" + Date.now(),
-      ticketNumber: `${prefix}-${num}`,
-      customerName: appForm.customerName || "Walk-in Guest",
-      serviceType: appForm.serviceType,
-      checkInTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      ticket_number: `${prefix}-${num}`,
+      customer_name: appForm.customer_name || "Walk-in Guest",
+      service_type: appForm.service_type,
+      check_in_time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       status: "waiting"
     };
     setLocalQueue(prev => [...prev, newTicket]);
-    addNotification("Ticket Issued", `${newTicket.ticketNumber} generated`, "success");
-    setAppForm({ customerName: "", serviceType: "Power of Attorney", date: "", time: "" });
+    addNotification("Ticket Issued", `${newTicket.ticket_number} generated`, "success");
+    setAppForm({ customer_name: "", service_type: "Power of Attorney", date: "", time: "" });
   };
 
   const handleCallNextTicket = () => {
@@ -383,7 +379,7 @@ export default function EmployeePortal({
     // Set active ticket to calling
     setLocalQueue(prev => prev.map(q => {
       if (q.id === waiting.id) {
-        return { ...q, status: "calling" as const, calledCounter: 2 };
+        return { ...q, status: "calling" as const, called_counter: 2 };
       }
       if (q.status === "calling" || q.status === "serving") {
         return { ...q, status: "completed" as const };
@@ -391,7 +387,7 @@ export default function EmployeePortal({
       return q;
     }));
     onAnnounceTicket(waiting, 2);
-    addNotification("Paging Customer", `Calling ${waiting.ticketNumber} to clerk workstation 2.`, "info");
+    addNotification("Paging Customer", `Calling ${waiting.ticket_number} to clerk workstation 2.`, "info");
   };
 
   const handleSkipTicket = (id: string) => {
@@ -416,10 +412,9 @@ export default function EmployeePortal({
       setAiDraftResults(result);
       setAiDraftLoading(false);
       // Auto populate into primary document creation body
-      setNewDoc({
+      (setNewDoc as any)({
         title: `AI Generated Power of Attorney - ${qaParams.grantor}`,
         type: "Power of Attorney",
-        parties: `${qaParams.grantor}, ${qaParams.receiver}`,
         content: result
       });
       addNotification("AI Power of Attorney Compiled", "Document template loaded.", "success");
@@ -458,7 +453,7 @@ export default function EmployeePortal({
             ? `CUSTOMER FOUND: ${found.name}\nPhone: ${found.phone}\nID Number: ${found.nationalId}\nFingerprint: ${found.fingerprintCaptured ? "Captured" : "Missing"}\nVisits: ${found.visits} total records.` 
             : `Customer search for "${namePart}" yielded 0 items. Ensure spelling is precise.`;
         } else if (userMsg.toLowerCase().includes("pending")) {
-          fallbackReply = `PENDING SYSTEM INVOICES:\n` + localInvoices.filter(i => i.status === "unpaid").map(i => `- ${i.customerName} (${i.invoiceNumber}): $${i.amount}`).join("\n");
+          fallbackReply = `PENDING SYSTEM INVOICES:\n` + localInvoices.filter(i => i.status === "unpaid").map(i => `- ${i.customer_name} (${i.invoiceNumber}): $${i.amount}`).join("\n");
         } else if (userMsg.toLowerCase().includes("summarize")) {
           fallbackReply = "CONTRACT SUMMARY:\n- Document Class: Non-Disclosure & Escrow\n- Parties: Principal Depositors\n- Key Condition: Escrow seals vest fully upon dual-biometric sign-off.\n- Escrow agent holds compliance authority.";
         }
@@ -474,19 +469,19 @@ export default function EmployeePortal({
   // Payments logic
   const handleCreateInvoice = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!invoiceForm.customerName.trim() || !invoiceForm.amount) return;
+    if (!invoiceForm.customer_name.trim() || !invoiceForm.amount) return;
     const added = {
       id: "inv-" + Date.now(),
       invoiceNumber: `INV-2026-0${localInvoices.length + 1}`,
-      customerName: invoiceForm.customerName,
+      customer_name: invoiceForm.customer_name,
       amount: parseFloat(invoiceForm.amount),
       dueDate: new Date(Date.now() + 10 * 86400000).toISOString().substring(0, 10),
       status: "unpaid" as const,
       items: [{ description: invoiceForm.description || "General Notary Service", price: parseFloat(invoiceForm.amount) }]
     };
     setLocalInvoices(prev => [added, ...prev]);
-    addNotification("Invoice Generated", `Billed ${added.customerName} $${added.amount}`, "success");
-    setInvoiceForm({ customerName: "", amount: "", description: "" });
+    addNotification("Invoice Generated", `Billed ${added.customer_name} $${added.amount}`, "success");
+    setInvoiceForm({ customer_name: "", amount: "", description: "" });
   };
 
   const handlePayInvoice = (id: string) => {
@@ -509,7 +504,7 @@ export default function EmployeePortal({
     )
   );
 
-  const selectedCust = customers.find(c => c.id === selectedCustId) || customers[0];
+  const selectedCust = customers.find(c => c.id === selectedCustId) ?? customers[0] ?? null;
 
   return (
     <div className={`space-y-6 p-1 dark-portal-wrapper ${isDarkMode ? "dark" : ""}`} id="clerk-workspace-portal">
@@ -872,10 +867,10 @@ export default function EmployeePortal({
                   <div className="mt-4 bg-slate-950 border border-slate-800 text-white rounded-2xl p-6 text-center space-y-1 relative overflow-hidden">
                     <span className="text-[10px] tracking-widest text-emerald-400 font-mono block uppercase">NOW SERVING AT DESK 2</span>
                     <span className="text-5xl font-mono tracking-tight text-white block py-2">
-                      {localQueue.find(q => q.status === "serving")?.ticketNumber || "A-12"}
+                      {localQueue.find(q => q.status === "serving")?.ticket_number || "A-12"}
                     </span>
                     <p className="text-xs text-slate-300 font-sans truncate font-bold">
-                      Caller: {localQueue.find(q => q.status === "serving")?.customerName || "Ahmed Ali"}
+                      Caller: {localQueue.find(q => q.status === "serving")?.customer_name || "Ahmed Ali"}
                     </p>
                   </div>
 
@@ -885,7 +880,7 @@ export default function EmployeePortal({
                     <div className="flex flex-wrap gap-1.5 pt-1">
                       {localQueue.filter(q => q.status === "waiting").map(q => (
                         <span key={q.id} className="bg-white border border-slate-200 px-2 py-1 rounded-lg text-xs font-mono font-bold text-slate-700 shadow-xs">
-                          {q.ticketNumber}
+                          {q.ticket_number}
                         </span>
                       ))}
                     </div>
@@ -912,7 +907,7 @@ export default function EmployeePortal({
                     <div key={tic.id} className="p-3 bg-slate-50 hover:bg-slate-100/50 rounded-xl border border-slate-200 flex items-center justify-between transition text-xs">
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="font-mono text-slate-900 font-extrabold text-sm">{tic.ticketNumber}</span>
+                          <span className="font-mono text-slate-900 font-extrabold text-sm">{tic.ticket_number}</span>
                           <span className={`px-2 py-0.5 text-[9px] font-bold rounded-full font-sans uppercase ${
                             tic.status === "serving" ? "bg-emerald-100 text-emerald-800 border border-emerald-250" :
                             tic.status === "calling" ? "bg-amber-100 text-amber-800 border border-amber-200 animate-pulse" :
@@ -920,14 +915,14 @@ export default function EmployeePortal({
                             "bg-blue-50 text-blue-700"
                           }`}>{tic.status}</span>
                         </div>
-                        <p className="text-slate-800 font-sans mt-0.5">Customer: <b>{tic.customerName}</b></p>
-                        <p className="text-[10px] text-slate-500 font-mono mt-0.5">Service: {tic.serviceType} • Time: {tic.checkInTime}</p>
+                        <p className="text-slate-800 font-sans mt-0.5">Customer: <b>{tic.customer_name}</b></p>
+                        <p className="text-[10px] text-slate-500 font-mono mt-0.5">Service: {tic.service_type} • Time: {tic.checkInTime}</p>
                       </div>
 
                       <div className="flex gap-1.5">
                         {tic.status === "waiting" && (
                           <button onClick={() => {
-                            setLocalQueue(prev => prev.map(q => q.id === tic.id ? { ...q, status: "calling" as const, calledCounter: 2 } : q));
+                            setLocalQueue(prev => prev.map(q => q.id === tic.id ? { ...q, status: "calling" as const, called_counter: 2 } : q));
                             onAnnounceTicket(tic, 2);
                           }} className="bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold px-2 py-1 rounded transition">
                             Call Desk 2
@@ -961,13 +956,13 @@ export default function EmployeePortal({
                     type="text"
                     required
                     placeholder="Walk-in Client Name"
-                    value={appForm.customerName}
-                    onChange={(e) => setAppForm(p => ({ ...p, customerName: e.target.value }))}
+                    value={appForm.customer_name}
+                    onChange={(e) => setAppForm(p => ({ ...p, customer_name: e.target.value }))}
                     className="flex-1 bg-white border border-slate-200 p-2 text-xs rounded-lg outline-none"
                   />
                   <select
-                    value={appForm.serviceType}
-                    onChange={(e) => setAppForm(p => ({ ...p, serviceType: e.target.value }))}
+                    value={appForm.service_type}
+                    onChange={(e) => setAppForm(p => ({ ...p, service_type: e.target.value }))}
                     className="bg-white border border-slate-200 p-2 text-xs rounded-lg outline-none"
                   >
                     <option value="Power of Attorney">Power of Attorney</option>
@@ -996,8 +991,8 @@ export default function EmployeePortal({
                   {localAppointments.map(ap => (
                     <div key={ap.id} className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 flex justify-between items-center text-xs">
                       <div>
-                        <span className="block font-bold text-slate-900 font-sans text-sm">{ap.customerName}</span>
-                        <span className="block text-blue-600 mt-1">{ap.serviceType}</span>
+                        <span className="block font-bold text-slate-900 font-sans text-sm">{ap.customer_name}</span>
+                        <span className="block text-blue-600 mt-1">{ap.service_type}</span>
                         <span className="block text-[10px] text-slate-500 font-mono mt-1">{ap.appointmentTime}</span>
                         <span className={`inline-block px-2 py-0.5 text-[9px] rounded-full font-bold uppercase tracking-wide mt-2 ${
                           ap.status === "completed" ? "bg-emerald-50 text-emerald-700 border border-emerald-100" :
@@ -1009,7 +1004,7 @@ export default function EmployeePortal({
                       <div className="flex flex-col gap-1 shrink-0">
                         {ap.status === "scheduled" && (
                           <>
-                            <button onClick={() => handleCheckInCustomer(ap.customerName, ap.serviceType)} className="bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold py-1 px-2.5 rounded transition">
+                            <button onClick={() => handleCheckInCustomer(ap.customer_name, ap.service_type)} className="bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold py-1 px-2.5 rounded transition">
                               Check In Lobby
                             </button>
                             <button onClick={() => handleReschedule(ap.id)} className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-[10px] font-bold py-1 px-2.5 rounded transition">
@@ -1017,7 +1012,7 @@ export default function EmployeePortal({
                             </button>
                             <button onClick={() => {
                               setLocalAppointments(prev => prev.map(a => a.id === ap.id ? { ...a, status: "canceled" as const } : a));
-                              addNotification("Booking Canceled", `Canceled schedule for ${ap.customerName}`, "warn");
+                              addNotification("Booking Canceled", `Canceled schedule for ${ap.customer_name}`, "warn");
                             }} className="bg-white hover:bg-red-50 hover:text-red-600 text-slate-400 border border-slate-200 text-[10px] py-1 px-2.5 rounded transition">
                               Cancel Booking
                             </button>
@@ -1043,16 +1038,16 @@ export default function EmployeePortal({
                       type="text"
                       required
                       placeholder="e.g. Ahmed Ali"
-                      value={appForm.customerName}
-                      onChange={(e) => setAppForm(p => ({ ...p, customerName: e.target.value }))}
+                      value={appForm.customer_name}
+                      onChange={(e) => setAppForm(p => ({ ...p, customer_name: e.target.value }))}
                       className="w-full bg-white border border-slate-200 p-2 text-xs rounded-lg outline-none text-slate-900"
                     />
                   </div>
                   <div>
                     <label className="block text-[9px] text-slate-500 font-mono mb-1 uppercase">Notary Service Type</label>
                     <select
-                      value={appForm.serviceType}
-                      onChange={(e) => setAppForm(p => ({ ...p, serviceType: e.target.value }))}
+                      value={appForm.service_type}
+                      onChange={(e) => setAppForm(p => ({ ...p, service_type: e.target.value }))}
                       className="w-full bg-white border border-slate-200 p-2 text-xs rounded-lg outline-none text-slate-900"
                     >
                       <option value="General Power of Attorney">General Power of Attorney</option>
@@ -1145,7 +1140,7 @@ export default function EmployeePortal({
                       <button onClick={() => setEditCustMode(null)} className="text-xs text-slate-500 font-semibold underline">Cancel</button>
                     </div>
 
-                    <form onSubmit={editCustMode === "new" ? handleRegisterCustomer : (e) => { e.preventDefault(); if (selectedCustId) handleUpdateCustomer(selectedCustId); }} className="grid grid-cols-2 gap-3.5 text-xs">
+                    <form onSubmit={editCustMode === "new" ? handleRegisterCustomer : (e) => { e.preventDefault(); if (selectedCust) handleUpdateCustomer(selectedCustId ?? ""); }} className="grid grid-cols-2 gap-3.5 text-xs">
                       <div className="col-span-2">
                         <label className="block text-[9px] text-slate-500 font-mono mb-1 uppercase">Full Name</label>
                         <input
@@ -1381,8 +1376,8 @@ export default function EmployeePortal({
                         <div>
                           <label className="block text-[9px] text-slate-500 font-mono mb-1 uppercase">Document Class</label>
                           <select
-                            value={newDoc.type}
-                            onChange={(e) => setNewDoc(p => ({ ...p, type: e.target.value }))}
+                            value={(newDoc as any)?.type}
+                            onChange={(e) => (setNewDoc as any)(p => ({ ...p, type: e.target.value }))}
                             className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg outline-none text-slate-900"
                           >
                             <option value="Power of Attorney">Power of Attorney</option>
@@ -1397,8 +1392,7 @@ export default function EmployeePortal({
                             type="text"
                             required
                             placeholder="e.g. Ahmed Ali, Elena Rostova"
-                            value={newDoc.parties}
-                            onChange={(e) => setNewDoc(p => ({ ...p, parties: e.target.value }))}
+                            value={(newDoc as any)?.parties}
                             className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg outline-none text-slate-900"
                           />
                         </div>
@@ -1406,8 +1400,8 @@ export default function EmployeePortal({
                           <label className="block text-[9px] text-slate-500 font-mono mb-1 uppercase">Custom Segment Heading</label>
                           <input
                             type="text"
-                            value={newDoc.title}
-                            onChange={(e) => setNewDoc(p => ({ ...p, title: e.target.value }))}
+                            value={(newDoc as any)?.title}
+                            onChange={(e) => (setNewDoc as any)(p => ({ ...p, title: e.target.value }))}
                             className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg outline-none text-slate-900"
                           />
                         </div>
@@ -1418,8 +1412,8 @@ export default function EmployeePortal({
                         <textarea
                           rows={4}
                           required
-                          value={newDoc.content}
-                          onChange={(e) => setNewDoc(p => ({ ...p, content: e.target.value }))}
+                          value={(newDoc as any)?.content}
+                          onChange={(e) => (setNewDoc as any)(p => ({ ...p, content: e.target.value }))}
                           className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-lg outline-none text-slate-900 font-mono text-[11px]"
                         />
                       </div>
@@ -1470,7 +1464,7 @@ export default function EmployeePortal({
                     <label className="block text-[9px] text-slate-500 font-mono mb-1 uppercase">Attorney / Receiver Name</label>
                     <input
                       type="text"
-                      placeholder="e.g. Robert Plant"
+                      placeholder="e.g. Hodan Jama"
                       value={qaParams.receiver}
                       onChange={(e) => setQaParams(p => ({ ...p, receiver: e.target.value }))}
                       className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg outline-none text-slate-900"
@@ -1547,7 +1541,7 @@ export default function EmployeePortal({
                       <Scan className="w-5 h-5 text-blue-600 shrink-0" />
                       <div>
                         <h6 className="font-bold text-slate-800 text-xs">US Passport Sample</h6>
-                        <span className="text-[9px] text-slate-450 font-mono">ALEXANDER WESTMORELAND - PP9843102</span>
+                        <span className="text-[9px] text-slate-450 font-mono">— scan an ID to populate —</span>
                       </div>
                     </button>
 
@@ -1664,8 +1658,8 @@ export default function EmployeePortal({
                         type="text"
                         required
                         placeholder="e.g. Ahmed Ali"
-                        value={invoiceForm.customerName}
-                        onChange={(e) => setInvoiceForm(p => ({ ...p, customerName: e.target.value }))}
+                        value={invoiceForm.customer_name}
+                        onChange={(e) => setInvoiceForm(p => ({ ...p, customer_name: e.target.value }))}
                         className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg outline-none text-slate-900 font-semibold"
                       />
                     </div>
@@ -1711,7 +1705,7 @@ export default function EmployeePortal({
                               inv.status === "paid" ? "bg-emerald-50 text-emerald-700 border border-emerald-100" : "bg-red-50 text-red-700"
                             }`}>{inv.status}</span>
                           </div>
-                          <p className="text-slate-800 font-sans mt-0.5">Recipient: <b>{inv.customerName}</b></p>
+                          <p className="text-slate-800 font-sans mt-0.5">Recipient: <b>{inv.customer_name}</b></p>
                           <p className="text-[10px] text-slate-500">Amount: <b>${inv.amount.toFixed(2)}</b> • Due: {inv.dueDate}</p>
                         </div>
 

@@ -1,3 +1,6 @@
+type Invoice = { id: string; invoiceNumber?: string; customerName: string; amount: number; dueDate: string; status: string; items?: { description: string; price: number }[] };
+type Appointment = { id: string; customerName: string; serviceType: string; appointmentTime: string; status: string; branchId?: string; customerEmail?: string };
+
 import React from "react";
 import { 
   Building2, Users, FileText, Calendar, 
@@ -7,7 +10,7 @@ import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, 
   CartesianGrid, Tooltip, BarChart, Bar, Legend 
 } from "recharts";
-import { Branch, Employee, NotaryDocument, Appointment, Invoice } from "../../types";
+import {Branch, Employee, NotaryDocument} from "../../types";
 
 interface CompanyAdminDashboardProps {
   branches: Branch[];

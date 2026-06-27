@@ -29,8 +29,8 @@ export interface RefreshTokenPayload {
 
 export function signAccessToken(payload: Omit<AccessTokenPayload, "iat" | "exp">): string {
   return jwt.sign(payload, ACCESS_SECRET, {
-    expiresIn: ACCESS_EXPIRES,
-    algorithm: "HS256",
+    expiresIn: ACCESS_EXPIRES as any,
+    algorithm: "HS256" as any,
   });
 }
 

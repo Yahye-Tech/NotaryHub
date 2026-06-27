@@ -1,16 +1,18 @@
 import React, { useState, useRef, useEffect } from "react";
+type Appointment = { id: string; branchId?: string; customer_name: string; service_type: string; appointmentTime: string; status: string; customerEmail?: string };
+
 import { 
   Building2, Users, Calendar, Clock, CheckCircle, ShieldAlert, FileText, 
   User, ArrowRight, Zap, Bell, Check, Search, UserPlus, Shield, Sparkles, 
   Lock, Key, Ban, UserCheck, AlertTriangle, Play, HelpCircle, Send, TrendingUp, 
   FileSpreadsheet, ClipboardList, RefreshCw, Star, Coins, Download, Settings, ChevronRight, X, Phone, Mail, Sliders, Menu, Sun, Moon
 } from "lucide-react";
-import { Branch, Employee, Appointment, QueueTicket, NotaryDocument } from "../types";
+import { Branch, Employee, QueueTicket, NotaryDocument } from "../types";
 
 interface BranchAdminPortalProps {
   branches: Branch[];
   employees: Employee[];
-  appointments: Appointment[];
+  appointments: never[];
   queue: QueueTicket[];
   documents?: NotaryDocument[];
   onLogout: () => void;
@@ -49,7 +51,6 @@ export default function BranchAdminPortal({
   
   // Active office target: Bosaso Main Branch is the fixed focus under SaaS structure
   const activeBranch = branches.find(b => b.name.includes("Bosaso Main Branch")) || branches[0] || {
-    id: "br-01",
     name: "Bosaso Main Branch",
     address: "Kismayo Street, Central Bosaso",
     phone: "+252 90 779 1234",
@@ -71,55 +72,25 @@ export default function BranchAdminPortal({
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Local state tables to make mutations functional for the Branch Admin (e.g. Crud Employees, manage queues, verify fingerprints)
-  const [localEmployees, setLocalEmployees] = useState<ExtendedEmployee[]>([
-    { id: "emp-101", name: "Ahmed Farah", email: "ahmed.farah@veritas.so", role: "Notary Officer", status: "available", assignedCounter: 1, permissions: ["Seal Documents", "Approve Drafts"] },
-    { id: "emp-102", name: "Elena Rostova", email: "elena.rostova@veritas.so", role: "Verification Officer", status: "busy", assignedCounter: 2, permissions: ["Verify Fingerprints", "Audit Identities"] },
-    { id: "emp-103", name: "Warsame Duale", email: "warsame.d@veritas.so", role: "Document Officer", status: "available", assignedCounter: 3, permissions: ["Draft Contracts", "Review Uploads"] },
-    { id: "emp-104", name: "Fathia Omar", email: "fathia.omar@veritas.so", role: "Receptionist", status: "available", assignedCounter: 4, permissions: ["Issue Queue Tickets", "Welcome Clients"] },
-    { id: "emp-105", name: "Hassan Mire", email: "hassan.m@veritas.so", role: "Cashier", status: "offline", assignedCounter: 5, permissions: ["Process Payments", "Issue Invoices"] }
-  ]);
+  const [localEmployees, setLocalEmployees] = useState<ExtendedEmployee[]>([]);
 
-  const [localQueue, setLocalQueue] = useState<QueueTicket[]>([
-    { id: "q-01", ticketNumber: "TKT-101", customerName: "Guled Gurey", serviceType: "Power of Attorney", checkInTime: "08:15 AM", status: "calling", calledCounter: 1 },
-    { id: "q-02", ticketNumber: "TKT-102", customerName: "Aishe Mohamed", serviceType: "Affidavit", checkInTime: "08:32 AM", status: "waiting" },
-    { id: "q-03", ticketNumber: "TKT-103", customerName: "Abdirahman Ali", serviceType: "Contract Review", checkInTime: "08:45 AM", status: "waiting" },
-    { id: "q-04", ticketNumber: "TKT-104", customerName: "Hodan Gelle", serviceType: "Identity Audit", checkInTime: "09:02 AM", status: "waiting" },
-    { id: "q-05", ticketNumber: "TKT-105", customerName: "Mohamed Warsame", serviceType: "Declaration Seal", checkInTime: "09:12 AM", status: "completed", servedBy: "Elena Rostova" }
-  ]);
+  const [localQueue, setLocalQueue] = useState<QueueTicket[]>([]);
 
-  const [localDocs, setLocalDocs] = useState<NotaryDocument[]>([
-    { id: "DOC-2026-00123", title: "Power of Attorney - Somaliland Transit Authority", status: "completed", parties: ["Ahmed Ali", "Farah Omar"], createdAt: "2026-06-11", watermarkCode: "BOSASO-CONF-882", fingerprintHash: "Verified ✓ sha256_99a8bd2" },
-    { id: "DOC-2026-00155", title: "Affidavit of Chicago Dual Residence Clearance", status: "pending-signature", parties: ["Elena Ahmed"], createdAt: "2026-06-12" },
-    { id: "DOC-2026-00192", title: "Land Deed Conveyance Covenant Pact", status: "draft", parties: ["Warsame Farah", "Khadar Corp"], createdAt: "2026-06-12" },
-    { id: "DOC-2026-00210", title: "Customs Import Clearing Authorization Letter", status: "archived", parties: ["Bosaso Port Terminal", "Somali Shipping Ltd"], createdAt: "2026-06-08" }
-  ]);
+  const [localDocs, setLocalDocs] = useState<NotaryDocument[]>([]);
 
-  const [localApps, setLocalApps] = useState<Appointment[]>([
-    { id: "app-301", branchId: "br-01", customerName: "Ubah Hersi", customerEmail: "ubah.h@example.com", serviceType: "Power of Attorney", appointmentTime: "09:30 AM", status: "scheduled" },
-    { id: "app-302", branchId: "br-01", customerName: "Khalid Yusuf", customerEmail: "khalid.y@example.com", serviceType: "Affidavit Seal", appointmentTime: "11:00 AM", status: "scheduled" },
-    { id: "app-303", branchId: "br-01", customerName: "Zainab Gurey", customerEmail: "zainab@example.com", serviceType: "Declaration Proof", appointmentTime: "02:00 PM", status: "scheduled" },
-    { id: "app-304", branchId: "br-01", customerName: "Saeed Hirsi", customerEmail: "saeed@example.com", serviceType: "Property Contract Seal", appointmentTime: "04:30 PM", status: "canceled" }
-  ]);
+  const [localApps, setLocalApps] = useState<Appointment[]>([]);
 
-  const [customers, setCustomers] = useState<AdminCustomer[]>([
-    { id: "c-01", name: "Ahmed Ali", phone: "+252 61 555-0144", nationalId: "ID-SOM-882291", docNumber: "DOC-2026-00123", status: "active", visitsCount: 5, historyLogs: ["Completed Power of Attorney", "Paid invoice #INV-00015"] },
-    { id: "c-02", name: "Warsame Farah", phone: "+252 90 721 9988", nationalId: "ID-SOM-110022", docNumber: "DOC-2026-00192", status: "active", visitsCount: 4, historyLogs: ["Drafted Real Estate Contract", "Fingerprint record validated"] },
-    { id: "c-03", name: "Elena Ahmed", phone: "+252 90 612 4040", nationalId: "ID-SOM-921004", docNumber: "DOC-2026-00155", status: "pending-verification", visitsCount: 2, historyLogs: ["Submitted Dual Residency Affidavit"] },
-    { id: "c-04", name: "Hassan Gelle", phone: "+252 90 550 1122", nationalId: "ID-SOM-404112", docNumber: "DOC-2026-00210", status: "active", visitsCount: 6, historyLogs: ["Archived Import Clearance letter"] }
-  ]);
+  const [customers, setCustomers] = useState<AdminCustomer[]>([]);
 
   const [notifications, setNotifications] = useState([
     { id: "not-1", type: "system", title: "New Employee Created", details: "Warsame Duale was added to Counter 3. System profile generated.", date: "Today, 08:00 AM" },
     { id: "not-2", type: "success", title: "Document Approved", details: "Power of Attorney (DOC-00123) digitally signed and watermarked.", date: "Today, 09:15 AM" },
     { id: "not-3", type: "alert", title: "Queue Overflow Warning", details: "Waiting queue exceeded SLA threshold of 5 clients in Bosaso.", date: "Yesterday, 04:00 PM" },
-    { id: "not-4", type: "info", title: "Appointment Calendar Shifted", details: "Ubah Hersi rescheduled power of attorney slot to 09:30 AM.", date: "Yesterday, 02:40 PM" }
   ]);
 
   // AI assistant states
   const [aiPrompt, setAiPrompt] = useState("");
-  const [aiHistory, setAiHistory] = useState<{ sender: "user" | "ai"; msg: string }[]>([
-    { sender: "ai", msg: "Greetings, Branch Manager. Ask me anything about Bosaso Main Branch metrics. Examples:\n- *'Which employee processed most documents?'*\n- *'Show pending documents.'*\n- *'Show busiest day this month.'*\n- *'Generate weekly branch report.'*" }
-  ]);
+  const [aiHistory, setAiHistory] = useState<{ sender: "user" | "ai"; msg: string }[]>([]);
 
   // General state triggers
   const [employeeSearch, setEmployeeSearch] = useState("");
@@ -183,19 +154,19 @@ export default function BranchAdminPortal({
     // Call the ticket to first available counter
     const updated = localQueue.map(q => {
       if (q.id === nextWaiting.id) {
-        return { ...q, status: "calling" as const, calledCounter: 1 };
+        return { ...q, status: "calling" as const, called_counter: 1 };
       }
       // Toggle previous calling tickets to completed
       if (q.status === "calling") {
-        return { ...q, status: "completed" as const, servedBy: "Ahmed Farah" };
+        return { ...q, status: "completed" as const, served_by: "Ahmed Farah" };
       }
       return q;
     });
     setLocalQueue(updated);
-    pageChime(`🛎️ Audio Chime: Calling Ticket ${nextWaiting.ticketNumber} (${nextWaiting.customerName}) to Counter 1.`);
+    pageChime(`🛎️ Audio Chime: Calling Ticket ${nextWaiting.ticket_number} (${nextWaiting.customer_name}) to Counter 1.`);
     
     setNotifications(prev => [
-      { id: Date.now().toString(), type: "info", title: "Ticket Status Shifted", details: `Called ${nextWaiting.customerName} (${nextWaiting.ticketNumber}) to Counter 1.`, date: "Just now" },
+      { id: Date.now().toString(), type: "info", title: "Ticket Status Shifted", details: `Called ${nextWaiting.customer_name} (${nextWaiting.ticket_number}) to Counter 1.`, date: "Just now" },
       ...prev
     ]);
   };
@@ -206,7 +177,7 @@ export default function BranchAdminPortal({
   };
 
   const handleTransferTicket = (id: string, newCounter: number) => {
-    setLocalQueue(prev => prev.map(q => q.id === id ? { ...q, status: "calling" as const, calledCounter: newCounter } : q));
+    setLocalQueue(prev => prev.map(q => q.id === id ? { ...q, status: "calling" as const, called_counter: newCounter } : q));
     pageChime(`⚙️ Ticket transferred successfully. Paged to Station Counter ${newCounter}.`);
   };
 
@@ -320,17 +291,17 @@ export default function BranchAdminPortal({
   };
 
   // Fingerprint and signature mock triggers
-  const executeFingerprintMatchAudit = (customerName: string) => {
+  const executeFingerprintMatchAudit = (customer_name: string) => {
     const isMatched = Math.random() > 0.05; // 95% verification success simulation
     if (isMatched) {
       setAuditLogs(prev => [
-        { time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), action: "Live Fingerprint Matching", status: "matching_success", entity: customerName, operator: "Elena Rostova" },
+        { time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), action: "Live Fingerprint Matching", status: "matching_success", entity: customer_name, operator: "Elena Rostova" },
         ...prev
       ]);
-      alert(`✓ BIOMETRICS REGISTERED: Fingerprint template matches the Somalian Federal Trust identity database for ${customerName}.`);
+      alert(`✓ BIOMETRICS REGISTERED: Fingerprint template matches the Somalian Federal Trust identity database for ${customer_name}.`);
     } else {
       setAuditLogs(prev => [
-        { time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), action: "Live Fingerprint Matching", status: "matching_failure", entity: customerName, operator: "Elena Rostova" },
+        { time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), action: "Live Fingerprint Matching", status: "matching_failure", entity: customer_name, operator: "Elena Rostova" },
         ...prev
       ]);
       alert(`⚠️ ERROR: Biometrics validation mismatch. Please clean reader and retry.`);
@@ -947,14 +918,14 @@ export default function BranchAdminPortal({
                           const svc = prompt("Enter service (Power of Attorney, Affidavit, Contract):") || "General Notary";
                           const newTicket: QueueTicket = {
                             id: Date.now().toString(),
-                            ticketNumber: "WALK-" + (localQueue.length + 101),
-                            customerName: guest,
-                            serviceType: svc,
-                            checkInTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                            ticket_number: "WALK-" + (localQueue.length + 101),
+                            customer_name: guest,
+                            service_type: svc,
+                            check_in_time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                             status: "waiting"
                           };
                           setLocalQueue(prev => [...prev, newTicket]);
-                          alert(`✓ Walk-in Ticket ${newTicket.ticketNumber} registered.`);
+                          alert(`✓ Walk-in Ticket ${newTicket.ticket_number} registered.`);
                         }
                       }}
                       className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs py-1.5 px-3 rounded-lg transition"
@@ -969,11 +940,11 @@ export default function BranchAdminPortal({
                     <div key={tkt.id} className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs font-sans">
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="bg-white border border-slate-300 font-mono font-bold text-slate-800 text-[10px] px-2 py-0.5 rounded-md shadow-xs">{tkt.ticketNumber}</span>
-                          <h4 className="font-bold text-slate-900 text-sm">{tkt.customerName}</h4>
+                          <span className="bg-white border border-slate-300 font-mono font-bold text-slate-800 text-[10px] px-2 py-0.5 rounded-md shadow-xs">{tkt.ticket_number}</span>
+                          <h4 className="font-bold text-slate-900 text-sm">{tkt.customer_name}</h4>
                         </div>
                         <p className="text-[10px] text-slate-500 mt-1 font-mono">
-                          Checked-in: <b>{tkt.checkInTime}</b> • Requested: <b className="text-slate-700">{tkt.serviceType}</b>
+                          Checked-in: <b>{tkt.checkInTime}</b> • Requested: <b className="text-slate-700">{tkt.service_type}</b>
                           {tkt.calledCounter && ` • Assigned Station: Counter ${tkt.calledCounter}`}
                           {tkt.servedBy && ` • Handled Code: ${tkt.servedBy}`}
                         </p>
@@ -1014,7 +985,7 @@ export default function BranchAdminPortal({
                         {tkt.status === "calling" && (
                           <button 
                             onClick={() => {
-                              setLocalQueue(prev => prev.map(q => q.id === tkt.id ? { ...q, status: "completed" as const, servedBy: "Elena Rostova" } : q));
+                              setLocalQueue(prev => prev.map(q => q.id === tkt.id ? { ...q, status: "completed" as const, served_by: "Elena Rostova" } : q));
                               alert("Ticket updated to completed.");
                             }}
                             className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold p-1 px-2.5 rounded-md font-sans text-[11px]"
@@ -1091,14 +1062,14 @@ export default function BranchAdminPortal({
                             <Calendar className="w-5 h-5" />
                           </div>
                           <div>
-                            <h4 className="font-bold text-slate-950 text-sm leading-tight">{app.customerName}</h4>
+                            <h4 className="font-bold text-slate-950 text-sm leading-tight">{app.customer_name}</h4>
                             <span className="text-[10px] text-slate-500 font-mono">{app.customerEmail}</span>
                           </div>
                         </div>
 
                         <div className="text-left sm:text-right font-mono">
                           <span className="text-indigo-700 block font-bold">{app.appointmentTime}</span>
-                          <span className="text-slate-650 block text-[11px] font-sans">Deed requested: <b>{app.serviceType}</b></span>
+                          <span className="text-slate-650 block text-[11px] font-sans">Deed requested: <b>{app.service_type}</b></span>
                         </div>
 
                         <div className="flex items-center gap-2">
@@ -1134,7 +1105,7 @@ export default function BranchAdminPortal({
                 {/* Calendar reassign popover simulated */}
                 {reassignAppTarget && (
                   <div className="p-4 bg-slate-100 border border-slate-350 rounded-xl space-y-3 font-sans text-xs">
-                    <p className="font-bold text-slate-800">Reassign {reassignAppTarget.customerName}'s schedule desk:</p>
+                    <p className="font-bold text-slate-800">Reassign {reassignAppTarget.customer_name}'s schedule desk:</p>
                     <div className="flex gap-2">
                       <select 
                         value={reassignTargetEmp}
@@ -1228,7 +1199,7 @@ export default function BranchAdminPortal({
                                 Review & Seal
                               </button>
                               <button 
-                                onClick={() => handleUpdateDocStatus(doc.id, "archived")}
+                                onClick={() => handleUpdateDocStatus(doc.id, "revoked")}
                                 className="text-slate-500 hover:underline px-1 font-bold text-[11px]"
                               >
                                 Archive
