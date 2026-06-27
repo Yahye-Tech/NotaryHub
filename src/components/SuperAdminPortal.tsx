@@ -8,6 +8,7 @@ import {
   Briefcase, Zap, Info, Receipt, Bot, Lock, Menu, Sun, Moon
 } from "lucide-react";
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Legend, LineChart, Line } from "recharts";
+import { TenantForm, Modal, type TenantFormData } from "./FormComponents";
 import { Tenant, Branch, Employee, QueueTicket, NotaryDocument, AuditLog } from "../types";
 import PermissionsConfig, { PermissionsMatrix } from "./PermissionsConfig";
 
@@ -77,6 +78,8 @@ export default function SuperAdminPortal({
   const [newCompanyEmail, setNewCompanyEmail] = useState("");
   const [newCompanyLicense, setNewCompanyLicense] = useState("");
   
+  const [showCreateTenantModal, setShowCreateTenantModal] = useState(false);
+
   // Filtering and Searching states
   const [globalSearchTerm, setGlobalSearchTerm] = useState("");
   const [auditFilterCompany, setAuditFilterCompany] = useState("all");

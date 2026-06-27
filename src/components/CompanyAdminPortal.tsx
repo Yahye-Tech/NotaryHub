@@ -7,6 +7,7 @@ import {
   LayoutDashboard, UserCheck, ShieldAlert, LogOut, Menu, X,
   Trash2, Edit, Edit3, Archive, KeyRound, Play, Plus, Clock, Shield, Sun, Moon
 } from "lucide-react";
+import { EmployeeForm, BranchForm, Modal, type EmployeeFormData, type BranchFormData } from "./FormComponents";
 import { Tenant, Branch, Employee, QueueTicket, NotaryDocument, AuditLog } from "../types";
 
 // Import custom extracted sub-components
@@ -26,7 +27,7 @@ interface CompanyAdminPortalProps {
   onDeleteBranch: (branchId: string) => void;
   onToggleArchiveBranch: (branchId: string) => void;
   employees: Employee[];
-  onAddEmployee: (branchId: string, name: string, email: string, role: Employee["job_role"]) => void;
+  onAddEmployee: (branchId: string, name: string, email: string, role: Employee["job_role"], password: string) => void;
   onEditEmployee: (empId: string, name: string, email: string, role: Employee["job_role"], branchId: string) => void;
   onDeleteEmployee: (empId: string) => void;
   onToggleArchiveEmployee: (empId: string) => void;
@@ -115,6 +116,8 @@ export default function CompanyAdminPortal({
 
   const [empName, setEmpName] = useState("");
   const [empEmail, setEmpEmail] = useState("");
+  const [empPassword, setEmpPassword] = useState("");
+  const [empPhone, setEmpPhone] = useState("");
   const [empRole, setEmpRole] = useState<Employee["job_role"]>("NOTARY_OFFICER");
   const [empSpecificRole, setEmpSpecificRole] = useState<string>("Notary Officer");
   const [empBranchId, setEmpBranchId] = useState(branches[0]?.id ?? "");
@@ -141,11 +144,15 @@ export default function CompanyAdminPortal({
 
   // Local collection clones for local operations if needed
   const [localBranches, setLocalBranches] = useState<Branch[]>(branches);
-  const activeTenantBranches = localBranches.filter(b => b.tenantId === activeTenant.id);
+  const activeTenantBranches = localBranches.filter(b => b.tenant_id === activeTenant.id);
   const [localEmployees, setLocalEmployees] = useState<Employee[]>(employees);
 
   const [branchDeleteConfirmId, setBranchDeleteConfirmId] = useState<string | null>(null);
   const [employeeDeleteConfirmId, setEmployeeDeleteConfirmId] = useState<string | null>(null);
+  const [showAddEmployeeModal, setShowAddEmployeeModal] = useState(false);
+  const [showAddBranchModal, setShowAddBranchModal] = useState(false);
+  const [showEditEmployeeModal, setShowEditEmployeeModal] = useState<Employee | null>(null);
+  const [showEditBranchModal, setShowEditBranchModal] = useState<Branch | null>(null);
 
   // Real-time synchronization of local clones to source parent database props to ensure instant UI automatic refreshes!
   useEffect(() => {
@@ -191,10 +198,12 @@ export default function CompanyAdminPortal({
       alert("No active branch is selected or available under this company registry. Please register a physical branch under the 'Branches' tab first before onboarding staff.");
       return;
     }
-    onAddEmployee(empBranchId, empName, empEmail, empRole);
+    onAddEmployee(empBranchId, empName, empEmail, empRole, empPassword);
     alert(`Success!\n\nOnboarded staff clerk "${empName}".`);
     setEmpName("");
     setEmpEmail("");
+    setEmpPassword("");
+    setEmpPhone("");
     setIsOnboardModalOpen(false);
   };
 
