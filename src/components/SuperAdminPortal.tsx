@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Legend, LineChart, Line } from "recharts";
 import { TenantForm, Modal, type TenantFormData } from "./FormComponents";
+import DynamicCharts from "./DynamicCharts";
 import { Tenant, Branch, Employee, QueueTicket, NotaryDocument, AuditLog } from "../types";
 import PermissionsConfig, { PermissionsMatrix } from "./PermissionsConfig";
 
@@ -30,7 +31,6 @@ interface SuperAdminPortalProps {
   documents: NotaryDocument[];
   invoices: Invoice[];
   auditLogs: AuditLog[];
-  metrics: MetricPoint[];
   featureFlags: Record<string, boolean>;
   onToggleFeature: (flag: string) => void;
   onLogout: () => void;
@@ -50,7 +50,6 @@ export default function SuperAdminPortal({
   documents,
   invoices,
   auditLogs,
-  metrics,
   featureFlags,
   onToggleFeature,
   onLogout,
@@ -709,7 +708,7 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
                       <h4 className="text-xs font-mono font-bold text-slate-400 uppercase tracking-wider">Resource Allocation graph</h4>
                       <div className="h-32 mt-2">
                         <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={metrics}>
+                          <BarChart data={[]}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                             <XAxis dataKey="time" stroke="#94a3b8" />
                             <YAxis stroke="#94a3b8" />
@@ -819,7 +818,7 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
                   </div>
                   <div className="h-56 mt-3">
                     <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={metrics}>
+                      <AreaChart data={[]}>
                         <defs>
                           <linearGradient id="colorRequests" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="5%" stopColor="#2563EB" stopOpacity={0.15}/>
@@ -1252,48 +1251,11 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
             )}
 
             {/* ========================================== */}
-            {/* VIEW 5: ANALYTICS INTELLIGENCE (Premium)   */}
+            {/* VIEW 5: ANALYTICS — real DB queries */}
             {/* ========================================== */}
             {activeSubTab === "analytics" && (
               <div className="space-y-4" id="saas-view-analytics">
-                <div className="bg-white border border-slate-200 p-4 rounded-xl">
-                  <h3 className="text-xs font-mono font-bold text-slate-400 uppercase tracking-widest">SaaS Analytics Insights</h3>
-                  <p className="text-xs text-slate-500 mt-1">Platform-level conversions, user retention metric streams</p>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Retention Chart */}
-                  <div className="bg-white border border-slate-200 p-4 rounded-2xl">
-                    <span className="text-[10px] font-mono text-slate-450 uppercase font-bold tracking-wider block mb-3">Resource Usage intensity</span>
-                    <div className="h-44">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={metrics}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                          <XAxis dataKey="time" stroke="#94a3b8" />
-                          <YAxis stroke="#94a3b8" />
-                          <Tooltip />
-                          <Line type="monotone" dataKey="requests" stroke="#2563EB" strokeWidth={2} name="Clerk signatures requests" />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-
-                  {/* CPU load */}
-                  <div className="bg-white border border-slate-200 p-4 rounded-2xl">
-                    <span className="text-[10px] font-mono text-slate-450 uppercase font-bold tracking-wider block mb-3">Acquisitions Conversions funnel</span>
-                    <div className="h-44">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={metrics}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                          <XAxis dataKey="time" stroke="#94a3b8" />
-                          <YAxis stroke="#94a3b8" />
-                          <Tooltip />
-                          <Area type="monotone" dataKey="activeUsers" fill="#0F766E" stroke="#0F766E" fillOpacity={0.05} name="Total global operators online" />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-                </div>
+                <DynamicCharts userRole="SUPER_ADMIN" />
               </div>
             )}
 

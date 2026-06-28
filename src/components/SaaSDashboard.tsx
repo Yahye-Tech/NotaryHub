@@ -716,7 +716,6 @@ export default function SaaSDashboard() {
             documents={[]}
             invoices={[]}
             auditLogs={[]}
-            metrics={[]}
             featureFlags={{ ocr: true, docGen: true, voiceChime: true }}
             onToggleFeature={() => {}}
             onLogout={handleLogout}
@@ -749,6 +748,7 @@ export default function SaaSDashboard() {
             appointments={[]}
             queue={[]}
             documents={[]}
+            userRole={currentUser.role}
             lockTenant={true}
             onLogout={handleLogout}
             auditLogs={[]}

@@ -39,6 +39,7 @@ interface CompanyAdminPortalProps {
   appointments: never[];
   queue: QueueTicket[];
   documents: NotaryDocument[];
+  userRole?: string;
   lockTenant?: boolean;
   onLogout: () => void;
   // Dynamic role controls
@@ -70,6 +71,7 @@ export default function CompanyAdminPortal({
   appointments,
   queue,
   documents,
+  userRole = "COMPANY_ADMIN",
   lockTenant = false,
   onLogout,
   permissionsMatrix,
@@ -607,6 +609,7 @@ export default function CompanyAdminPortal({
           
           {activeTab === "dashboard" && (
             <CompanyAdminDashboard
+              userRole={userRole}
               branches={activeTenantBranches}
               employees={localEmployees}
               documents={documents}
