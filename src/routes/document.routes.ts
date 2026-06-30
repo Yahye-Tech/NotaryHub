@@ -167,6 +167,17 @@ router.post("/", requireAuth, requireMinRole("EMPLOYEE"), [
 
     res.status(201).json({ message: "Document created", document });
   } catch (err: any) {
+    if (err.message === "CUSTOMER_BLACKLISTED") {
+      res.status(403).json({
+        error: "CUSTOMER_BLACKLISTED",
+        message: "This customer is blacklisted and cannot have new documents created for them",
+      });
+      return;
+    }
+    if (err.message === "CUSTOMER_NOT_FOUND") {
+      res.status(404).json({ error: "CUSTOMER_NOT_FOUND", message: "Selected customer not found" });
+      return;
+    }
     console.error("[Documents] Create error:", err.message);
     res.status(500).json({ error: "INTERNAL_ERROR", message: "Failed to create document" });
   }

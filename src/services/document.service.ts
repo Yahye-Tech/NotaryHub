@@ -230,6 +230,20 @@ export interface CreateDocumentInput {
 }
 
 export async function createDocument(input: CreateDocumentInput): Promise<DocumentRecord> {
+  // Enforce: blacklisted customers cannot have new documents created for them
+  if (input.customerId) {
+    const { rows: custRows } = await query<{ status: string; full_name: string }>(
+      `SELECT status, full_name FROM customers WHERE id = $1 AND tenant_id = $2 AND is_deleted = FALSE`,
+      [input.customerId, input.tenantId]
+    );
+    if (custRows.length === 0) {
+      throw new Error("CUSTOMER_NOT_FOUND");
+    }
+    if (custRows[0].status === "blacklisted") {
+      throw new Error("CUSTOMER_BLACKLISTED");
+    }
+  }
+
   const documentNumber = await generateDocumentNumber(input.tenantId);
 
   const { rows } = await query<DocumentRecord>(

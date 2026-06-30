@@ -86,6 +86,26 @@ export interface CreateCustomerInput {
   notes?: string;
 }
 
+export interface CustomerDocumentHistoryItem {
+  document_id: string;
+  document_number: string;
+  title: string;
+  doc_type: string;
+  status: string;
+  branch_name: string;
+  processed_by_name: string | null;
+  created_at: string;
+  notarised_at: string | null;
+}
+
+export interface CustomerActivityItem {
+  action: string;
+  resource_type: string;
+  resource_label: string | null;
+  actor_name: string | null;
+  created_at: string;
+}
+
 export const customersApi = {
   list: (search?: string) =>
     api.get<{ customers: Customer[] }>(
@@ -94,6 +114,11 @@ export const customersApi = {
 
   get: (id: string) =>
     api.get<{ customer: Customer }>(`/api/customers/${id}`),
+
+  history: (id: string) =>
+    api.get<{ documents: CustomerDocumentHistoryItem[]; activity: CustomerActivityItem[] }>(
+      `/api/customers/${id}/history`
+    ),
 
   create: (data: CreateCustomerInput) =>
     api.post<{ message: string; customer: Customer }>("/api/customers", data),

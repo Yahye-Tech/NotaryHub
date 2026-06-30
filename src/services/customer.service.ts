@@ -217,3 +217,84 @@ export async function deleteCustomer(
     [customerId, tenantId, deletedBy]
   );
 }
+
+// ─── Document history ──────────────────────────────────────────────────────────
+// Real per-customer document trail — replaces the fake `history` array
+// that previously lived only in frontend React state.
+
+export interface CustomerDocumentHistoryRow {
+  document_id: string;
+  document_number: string;
+  title: string;
+  doc_type: string;
+  status: string;
+  branch_name: string;
+  processed_by_name: string | null;
+  created_at: string;
+  notarised_at: string | null;
+}
+
+export async function getCustomerDocumentHistory(
+  customerId: string,
+  tenantId: string
+): Promise<CustomerDocumentHistoryRow[]> {
+  const { rows } = await query<CustomerDocumentHistoryRow>(
+    `SELECT
+       d.id              AS document_id,
+       d.document_number,
+       d.title,
+       d.doc_type,
+       d.status,
+       b.name            AS branch_name,
+       u.full_name       AS processed_by_name,
+       d.created_at,
+       d.notarised_at
+     FROM documents d
+     JOIN branches b ON b.id = d.branch_id
+     LEFT JOIN users u ON u.id = d.processed_by
+     WHERE d.customer_id = $1
+       AND d.tenant_id = $2
+       AND d.is_deleted = FALSE
+     ORDER BY d.created_at DESC`,
+    [customerId, tenantId]
+  );
+  return rows;
+}
+
+// ─── Activity audit trail ──────────────────────────────────────────────────────
+// Pulls real entries from audit_logs where resource_id = customerId
+
+export interface CustomerActivityRow {
+  action: string;
+  resource_type: string;
+  resource_label: string | null;
+  actor_name: string | null;
+  created_at: string;
+}
+
+export async function getCustomerActivity(
+  customerId: string,
+  tenantId: string
+): Promise<CustomerActivityRow[]> {
+  const { rows } = await query<CustomerActivityRow>(
+    `SELECT
+       a.action,
+       a.resource_type,
+       a.resource_label,
+       u.full_name AS actor_name,
+       a.created_at
+     FROM audit_logs a
+     LEFT JOIN users u ON u.id = a.user_id
+     WHERE a.tenant_id = $2
+       AND (
+         (a.resource_type = 'customer' AND a.resource_id = $1)
+         OR (a.resource_type = 'document' AND a.resource_id IN (
+           SELECT id FROM documents WHERE customer_id = $1 AND tenant_id = $2
+         ))
+       )
+     ORDER BY a.created_at DESC
+     LIMIT 50`,
+    [customerId, tenantId]
+  );
+  return rows;
+}

@@ -8,6 +8,8 @@ import {
   createCustomer,
   updateCustomer,
   deleteCustomer,
+  getCustomerDocumentHistory,
+  getCustomerActivity,
 } from "../services/customer.service.js";
 import { writeAuditLog } from "../auth/auth.service.js";
 
@@ -165,6 +167,41 @@ router.patch("/:id", requireAuth, requireMinRole("EMPLOYEE"), [
     }
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/customers/:id/history
+// Real document history + activity trail for this customer.
+// Replaces the fake hardcoded `history` array that lived in frontend state.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/:id/history", requireAuth, requireMinRole("EMPLOYEE"),
+  [param("id").isUUID()],
+  async (req: Request, res: Response) => {
+    if (!validate(req, res)) return;
+
+    const tenantId = req.user!.tenantId;
+    if (!tenantId) {
+      res.status(400).json({ error: "NO_TENANT" });
+      return;
+    }
+
+    const customer = await getCustomerById(req.params.id, tenantId);
+    if (!customer) {
+      res.status(404).json({ error: "NOT_FOUND", message: "Customer not found" });
+      return;
+    }
+
+    try {
+      const [documents, activity] = await Promise.all([
+        getCustomerDocumentHistory(req.params.id, tenantId),
+        getCustomerActivity(req.params.id, tenantId),
+      ]);
+      res.json({ documents, activity });
+    } catch (err: any) {
+      console.error("[Customers] History error:", err.message);
+      res.status(500).json({ error: "INTERNAL_ERROR", message: "Failed to load customer history" });
+    }
+  }
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DELETE /api/customers/:id

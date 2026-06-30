@@ -187,6 +187,42 @@ FK_CHECK=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notar
 [ "$FK_CHECK" = "1" ] && { echo "  PASS: 5e document-customer FK relationship intact"; PASS=$((PASS+1)); } \
                        || { echo "  FAIL: 5e FK join failed"; FAIL=$((FAIL+1)); }
 
+
+echo "=== BLOCK 6: CUSTOMER HISTORY (Step 8) ==="
+
+R=$(curl -s "$BASE/api/customers/$CUST_ID/history" -H "Authorization: Bearer $BOSASO_ADMIN")
+check "6a customer history returns documents array" "$R" '"documents"'
+check "6b history shows linked document" "$R" "POA Test Doc"
+check "6c history shows real document_number" "$R" "BOS-2026-"
+
+echo "=== BLOCK 7: BLACKLIST ENFORCEMENT (Step 8) ==="
+
+R=$(curl -s -X PATCH "$BASE/api/customers/$CUST_ID" \
+  -H "Authorization: Bearer $BOSASO_ADMIN" -H "Content-Type: application/json" \
+  -d '{"status":"blacklisted","blacklistReason":"Test blacklist reason"}')
+check "7a customer can be blacklisted" "$R" "blacklisted"
+
+R=$(curl -s -X POST "$BASE/api/documents" \
+  -H "Authorization: Bearer $VANCE_TOKEN" -H "Content-Type: application/json" \
+  -d "{\"branchId\":\"$BOSASO_BRANCH\",\"title\":\"Should Fail\",\"docType\":\"DEED\",\"customerId\":\"$CUST_ID\"}")
+check "7b blacklisted customer blocked from new documents" "$R" "CUSTOMER_BLACKLISTED"
+
+R=$(curl -s -X PATCH "$BASE/api/customers/$CUST_ID" \
+  -H "Authorization: Bearer $BOSASO_ADMIN" -H "Content-Type: application/json" \
+  -d '{"status":"active"}')
+check "7c customer can be restored to active" "$R" '"status":"active"'
+
+R=$(curl -s -X POST "$BASE/api/documents" \
+  -H "Authorization: Bearer $VANCE_TOKEN" -H "Content-Type: application/json" \
+  -d "{\"branchId\":\"$BOSASO_BRANCH\",\"title\":\"Should Succeed Now\",\"docType\":\"DEED\",\"customerId\":\"$CUST_ID\"}")
+check "7d restored customer can get new documents" "$R" "Should Succeed Now"
+
+echo "=== BLOCK 8: CROSS-TENANT HISTORY ISOLATION ==="
+
+R=$(curl -s "$BASE/api/customers/$CUST_ID/history" -H "Authorization: Bearer $PUNTLAND_ADMIN")
+check "8a cross-tenant history access blocked" "$R" "NOT_FOUND"
+
+
 echo ""
 echo "============================================"
 echo " FINAL: $PASS passed / $((PASS+FAIL)) total   |   FAIL: $FAIL"
