@@ -925,3 +925,235 @@ export function Modal({ title, subtitle, onClose, children, maxWidth = "max-w-2x
     </div>
   );
 }
+
+
+// ═════════════════════════════════════════════════════════════════════════════
+// CUSTOMER FORM
+// Fields: Full Name, Email, Phone, Date of Birth, Nationality,
+//         Address, City, Country, ID Type, ID Number,
+//         ID Issue Date, ID Expiry Date, Issuing Authority, Notes
+// ═════════════════════════════════════════════════════════════════════════════
+
+export interface CustomerFormData {
+  fullName: string;
+  email: string;
+  phone: string;
+  dateOfBirth: string;
+  nationality: string;
+  address: string;
+  city: string;
+  country: string;
+  idType: string;
+  idNumber: string;
+  idIssueDate: string;
+  idExpiryDate: string;
+  idIssuingAuthority: string;
+  notes: string;
+}
+
+interface CustomerFormProps {
+  initial?: Partial<CustomerFormData>;
+  onSubmit: (data: CustomerFormData) => Promise<void>;
+  onCancel: () => void;
+  mode?: "create" | "edit";
+}
+
+export function CustomerForm({ initial, onSubmit, onCancel, mode = "create" }: CustomerFormProps) {
+  const [form, setForm] = useState<CustomerFormData>({
+    fullName:           initial?.fullName           ?? "",
+    email:              initial?.email              ?? "",
+    phone:              initial?.phone              ?? "",
+    dateOfBirth:        initial?.dateOfBirth        ?? "",
+    nationality:        initial?.nationality        ?? "Somali",
+    address:            initial?.address            ?? "",
+    city:               initial?.city               ?? "",
+    country:            initial?.country            ?? "Somalia",
+    idType:             initial?.idType             ?? "NATIONAL_ID",
+    idNumber:           initial?.idNumber           ?? "",
+    idIssueDate:        initial?.idIssueDate        ?? "",
+    idExpiryDate:       initial?.idExpiryDate       ?? "",
+    idIssuingAuthority: initial?.idIssuingAuthority ?? "",
+    notes:              initial?.notes              ?? "",
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState<string | null>(null);
+
+  const set = <K extends keyof CustomerFormData>(key: K, val: CustomerFormData[K]) =>
+    setForm(prev => ({ ...prev, [key]: val }));
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (!form.fullName.trim()) { setError("Full name is required."); return; }
+    setLoading(true);
+    try {
+      await onSubmit(form);
+    } catch (err: any) {
+      setError(err.message ?? "Failed to save customer.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const idTypeOptions = [
+    { value: "NATIONAL_ID",       label: "National ID Card" },
+    { value: "PASSPORT",          label: "Passport" },
+    { value: "DRIVERS_LICENSE",   label: "Driver's License" },
+    { value: "RESIDENCE_PERMIT",  label: "Residence Permit" },
+    { value: "OTHER",             label: "Other" },
+  ];
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-5">
+      {error && (
+        <div className="flex items-start gap-2 text-xs text-rose-700 bg-rose-50 border border-rose-200 p-3 rounded-xl">
+          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+          {error}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Field label="Full Legal Name" required>
+          <div className="relative">
+            <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input type="text" required value={form.fullName}
+              onChange={e => set("fullName", e.target.value)}
+              placeholder="Hodan Jama Ali"
+              className={`${inputClass} pl-10`} />
+          </div>
+        </Field>
+
+        <Field label="Email Address">
+          <div className="relative">
+            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input type="email" value={form.email}
+              onChange={e => set("email", e.target.value)}
+              placeholder="hodan@example.com"
+              className={`${inputClass} pl-10`} />
+          </div>
+        </Field>
+
+        <Field label="Phone Number">
+          <div className="relative">
+            <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input type="tel" value={form.phone}
+              onChange={e => set("phone", e.target.value)}
+              placeholder="+252 61 234 5678"
+              className={`${inputClass} pl-10`} />
+          </div>
+        </Field>
+
+        <Field label="Date of Birth">
+          <input type="date" value={form.dateOfBirth}
+            onChange={e => set("dateOfBirth", e.target.value)}
+            className={inputClass} />
+        </Field>
+
+        <Field label="Nationality">
+          <input type="text" value={form.nationality}
+            onChange={e => set("nationality", e.target.value)}
+            placeholder="Somali"
+            className={inputClass} />
+        </Field>
+
+        <Field label="Country">
+          <div className="relative">
+            <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <select value={form.country}
+              onChange={e => set("country", e.target.value)}
+              className={`${selectClass} pl-10`}>
+              <option value="Somalia">Somalia</option>
+              <option value="Ethiopia">Ethiopia</option>
+              <option value="Kenya">Kenya</option>
+              <option value="Djibouti">Djibouti</option>
+              <option value="UAE">UAE</option>
+              <option value="UK">UK</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+        </Field>
+      </div>
+
+      <Field label="Address">
+        <div className="relative">
+          <MapPin className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+          <textarea rows={2} value={form.address}
+            onChange={e => set("address", e.target.value)}
+            placeholder="Street, district, city"
+            className={`${inputClass} pl-10 resize-none`} />
+        </div>
+      </Field>
+
+      {/* ID Document section */}
+      <div className="border border-slate-200 rounded-xl p-4 space-y-4 bg-slate-50/50">
+        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
+          Identity Document
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Field label="ID Type" required>
+            <select value={form.idType}
+              onChange={e => set("idType", e.target.value)}
+              className={selectClass}>
+              {idTypeOptions.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="ID Number" required>
+            <div className="relative">
+              <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input type="text" value={form.idNumber}
+                onChange={e => set("idNumber", e.target.value)}
+                placeholder="SO-NID-2024-000001"
+                className={`${inputClass} pl-10 font-mono`} />
+            </div>
+          </Field>
+
+          <Field label="Issue Date">
+            <input type="date" value={form.idIssueDate}
+              onChange={e => set("idIssueDate", e.target.value)}
+              className={inputClass} />
+          </Field>
+
+          <Field label="Expiry Date">
+            <input type="date" value={form.idExpiryDate}
+              onChange={e => set("idExpiryDate", e.target.value)}
+              className={inputClass} />
+          </Field>
+
+          <Field label="Issuing Authority" hint="e.g. Ministry of Interior">
+            <div className="relative">
+              <Shield className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input type="text" value={form.idIssuingAuthority}
+                onChange={e => set("idIssuingAuthority", e.target.value)}
+                placeholder="Puntland Civil Registry"
+                className={`${inputClass} pl-10`} />
+            </div>
+          </Field>
+        </div>
+      </div>
+
+      <Field label="Notes" hint="Internal notes — not shown to the customer">
+        <textarea rows={2} value={form.notes}
+          onChange={e => set("notes", e.target.value)}
+          placeholder="Any additional information…"
+          className={`${inputClass} resize-none`} />
+      </Field>
+
+      <div className="flex justify-end gap-3 pt-2 border-t border-slate-100">
+        <button type="button" onClick={onCancel}
+          className="px-4 py-2.5 text-sm border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-700 transition">
+          Cancel
+        </button>
+        <button type="submit" disabled={loading}
+          className="px-6 py-2.5 text-sm bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-xl font-semibold flex items-center gap-2 transition">
+          {loading
+            ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
+            : <><CheckCircle className="w-4 h-4" /> {mode === "create" ? "Add Customer" : "Save Changes"}</>
+          }
+        </button>
+      </div>
+    </form>
+  );
+}
