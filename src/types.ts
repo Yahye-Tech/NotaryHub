@@ -178,14 +178,23 @@ export interface Notification {
 
 export interface QueueTicket {
   id: string;
+  tenant_id: string;
+  branch_id: string;
   ticket_number: string;
+  sequence_num: number;
+  ticket_date: string;
+  customer_id: string | null;
   customer_name: string;
   service_type: string;
+  status: "waiting" | "calling" | "serving" | "completed" | "passed" | "cancelled";
+  called_counter: number | null;
+  served_by: string | null;
+  served_by_name?: string | null;
   check_in_time: string;
-  status: "waiting" | "calling" | "serving" | "completed" | "passed";
-  called_counter?: number | null;
-  served_by?: string | null;
-  tenant_id?: string | null;
-  branch_id?: string | null;
-  created_at?: string;
+  called_at: string | null;
+  serving_at: string | null;
+  completed_at: string | null;
+  document_id: string | null;
+  created_at: string;
+  updated_at: string;
 }
