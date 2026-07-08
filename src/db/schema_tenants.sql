@@ -187,3 +187,16 @@ SELECT
 WHERE NOT EXISTS (
   SELECT 1 FROM employees WHERE user_id = 'b9628baa-9b9e-47a1-85b5-7cd798e661bb'
 );
+
+-- ─── Seed: branch admin employee records (required for branch-scoped API access) ─
+INSERT INTO employees (user_id, tenant_id, branch_id, job_role, assigned_counter)
+SELECT u.id, u.tenant_id, '135aa207-1cc2-4417-9bc0-b68c3ae9cf69', 'BRANCH_ADMIN', 1
+FROM users u
+WHERE u.email = 'supervisor@bosaso-main.com'
+  AND NOT EXISTS (SELECT 1 FROM employees e WHERE e.user_id = u.id);
+
+INSERT INTO employees (user_id, tenant_id, branch_id, job_role, assigned_counter)
+SELECT u.id, u.tenant_id, '5f12bfe5-ca47-4bea-a8e9-6ae9f6bbe6ad', 'BRANCH_ADMIN', 1
+FROM users u
+WHERE u.email = 'supervisor@galkayo-hub.com'
+  AND NOT EXISTS (SELECT 1 FROM employees e WHERE e.user_id = u.id);

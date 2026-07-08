@@ -1,13 +1,50 @@
 import QueuePanel from "./QueuePanel";
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { 
   Users, UserPlus, Volume2, CheckCircle, Scan, UserCheck, Search, Plus, Calendar, Clock,
   Fingerprint, Sparkles, FileText, Check, Copy, Sliders, AlertTriangle, RefreshCw, Trash,
   Printer, Upload, CreditCard, Send, Lock, Eye, CheckSquare, XCircle, Bell, ArrowRight, Menu, X, Sun, Moon
 } from "lucide-react";
-import { QueueTicket, NotaryDocument } from "../types";
+import { QueueTicket, NotaryDocument, Customer } from "../types";
+import { documentsApi, customersApi } from "../api/documents.api";
+import { appointmentsApi, toUiAppointment } from "../api/appointments.api";
+import { queueApi } from "../api/queue.api";
+import { getAccessToken, ApiException } from "../api/client";
+
+interface DeskCustomer {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  nationalId: string;
+  address: string;
+  dob: string;
+  fingerprintCaptured?: boolean;
+  fingerprintVerified?: boolean;
+  signatureCaptured?: boolean;
+  visits?: number;
+}
+
+function customerToDesk(c: Customer): DeskCustomer {
+  return {
+    id: c.id,
+    name: c.full_name,
+    email: c.email ?? "",
+    phone: c.phone ?? "",
+    nationalId: c.id_number ?? "",
+    address: c.address ?? "",
+    dob: c.date_of_birth ?? "",
+    fingerprintCaptured: false,
+    fingerprintVerified: false,
+    signatureCaptured: false,
+    visits: 1,
+  };
+}
 
 interface EmployeePortalProps {
+  branchId?: string;
+  branchName?: string;
+  employeeName?: string;
   queue: QueueTicket[];
   onAnnounceTicket: (ticket: QueueTicket, counter: number) => void;
   onAdvanceTicketStatus: (id: string, status: QueueTicket["status"]) => void;
@@ -46,6 +83,9 @@ interface EmployeePortalProps {
 }
 
 export default function EmployeePortal({
+  branchId,
+  branchName,
+  employeeName,
   queue: propQueue,
   onAnnounceTicket,
   onAdvanceTicketStatus,
@@ -96,10 +136,13 @@ export default function EmployeePortal({
   }, [isDarkMode]);
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const ocrFileInputRef = useRef<HTMLInputElement>(null);
+  const [localOcrLoading, setLocalOcrLoading] = useState(false);
+  const [localOcrData, setLocalOcrData] = useState<any>(null);
+  const [deskLoading, setDeskLoading] = useState(true);
 
   // Local state arrays for CRUD & interaction
-  const [customers, setCustomers] = useState([
-  ]);
+  const [customers, setCustomers] = useState<DeskCustomer[]>([]);
 
   const [localDocs, setLocalDocs] = useState<NotaryDocument[]>([]);
 
@@ -144,24 +187,105 @@ export default function EmployeePortal({
   // General state variables
   const [appForm, setAppForm] = useState({ customer_name: "", service_type: "Power of Attorney", date: "", time: "" });
   const [invoiceForm, setInvoiceForm] = useState({ customer_name: "", amount: "", description: "" });
-  const [clerkProfile, setClerkProfile] = useState({ name: "Elena Rostova", role: "Clerk Practitioner", email: "e.rostova@veritas.com", avatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=120" });
+  const [clerkProfile, setClerkProfile] = useState({
+    name: employeeName ?? "Notary Officer",
+    role: "Notary Officer",
+    email: "",
+    avatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=120",
+  });
   const [clerkLanguage, setClerkLanguage] = useState("English (US)");
+
+  useEffect(() => {
+    if (employeeName) {
+      setClerkProfile(prev => ({ ...prev, name: employeeName }));
+    }
+  }, [employeeName]);
+
+  const loadDeskData = useCallback(async () => {
+    setDeskLoading(true);
+    try {
+      const [docsRes, custsRes, appsRes, queueRes] = await Promise.all([
+        documentsApi.list({ limit: 100 }),
+        customersApi.list(),
+        appointmentsApi.list({ limit: 100 }),
+        queueApi.list(branchId),
+      ]);
+      setLocalDocs(docsRes.documents);
+      setCustomers(custsRes.customers.map(customerToDesk));
+      setLocalAppointments(appsRes.appointments.map(a => {
+        const ui = toUiAppointment(a);
+        return {
+          id: ui.id,
+          customer_name: ui.customerName,
+          service_type: ui.serviceType,
+          appointmentTime: ui.appointmentTime,
+          status: ui.status,
+        };
+      }));
+      setLocalQueue(queueRes.tickets);
+    } catch (err) {
+      console.error("[EmployeePortal] Failed to load desk data:", err);
+    } finally {
+      setDeskLoading(false);
+    }
+  }, [branchId]);
+
+  useEffect(() => { loadDeskData(); }, [loadDeskData]);
+
+  const effectiveOcrLoading = ocrLoading || localOcrLoading;
+  const effectiveOcrData = ocrData ?? localOcrData;
+
+  const handleOcrFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLocalOcrLoading(true);
+    setLocalOcrData(null);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          resolve(result.split(",")[1] ?? "");
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const token = getAccessToken();
+      const response = await fetch("/api/gemini/ocr", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify({ imageBase64: base64, mimeType: file.type || "image/jpeg" }),
+      });
+      const data = await response.json();
+      if (!data.success) throw new Error(data.error ?? "OCR failed");
+      setLocalOcrData(data.data);
+      onIdentityOcrScan(0);
+    } catch (err: any) {
+      alert(err.message ?? "OCR scan failed. Check that GEMINI_API_KEY is configured.");
+    } finally {
+      setLocalOcrLoading(false);
+      if (ocrFileInputRef.current) ocrFileInputRef.current.value = "";
+    }
+  };
 
   // Syncing with OCR
   useEffect(() => {
-    if (ocrData) {
+    if (effectiveOcrData) {
       setNewCust({
-        name: ocrData.fullName || "",
-        email: ocrData.email || `${(ocrData.fullName || "user").toLowerCase().replace(/\s+/g, ".")}@gmail.com`,
-        phone: "(312) 555-4422",
-        nationalId: ocrData.documentNumber || "",
-        address: ocrData.address || "100 Transit Way, Boston MA",
-        dob: ocrData.dob || "1990-01-01"
+        name: effectiveOcrData.fullName || "",
+        email: effectiveOcrData.email || `${(effectiveOcrData.fullName || "user").toLowerCase().replace(/\s+/g, ".")}@email.com`,
+        phone: newCust.phone || "",
+        nationalId: effectiveOcrData.documentNumber || "",
+        address: effectiveOcrData.address || "",
+        dob: effectiveOcrData.dob || "",
       });
-      // Fire notification
-      addNotification("OCR Scan Completed", `Parsed details for ${ocrData.fullName} extracted successfully.`, "success");
+      addNotification("OCR Scan Completed", `Parsed details for ${effectiveOcrData.fullName} extracted successfully.`, "success");
     }
-  }, [ocrData]);
+  }, [effectiveOcrData]);
 
   const addNotification = (title: string, text: string, type: "info" | "warn" | "success") => {
     setNotifications(prev => [{ id: "n-" + Date.now(), title, text, time: "Just now", type }, ...prev]);
@@ -190,7 +314,7 @@ export default function EmployeePortal({
   };
 
   // Customers logic
-  const handleRegisterCustomer = (e: React.FormEvent) => {
+  const handleRegisterCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCust.name.trim()) {
       alert("Validation Failed: Customer Name is required.");
@@ -204,110 +328,103 @@ export default function EmployeePortal({
       alert("Validation Failed: Phone Number is required.");
       return;
     }
-
-    // Validate email format if provided
     if (newCust.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newCust.email)) {
       alert("Validation Failed: Invalid Email Format.");
       return;
     }
 
-    // Duplicate Check
-    const exists = customers.find(c => 
-      c.nationalId.trim().toLowerCase() === newCust.nationalId.trim().toLowerCase() ||
-      c.phone.replace(/[\s()+-]/g, "") === newCust.phone.replace(/[\s()+-]/g, "") ||
-      (newCust.email && c.email.trim().toLowerCase() === newCust.email.trim().toLowerCase())
-    );
-
-    if (exists) {
-      alert(`⚠️ DUPLICATE DETECTED\n\nA customer record matching this National ID, Phone, or Email already exists under the name of "${exists.name}". Custom rules prevent duplicate creation.`);
-      return;
+    try {
+      const res = await customersApi.create({
+        fullName: newCust.name.trim(),
+        email: newCust.email || undefined,
+        phone: newCust.phone.trim(),
+        address: newCust.address || undefined,
+        dateOfBirth: newCust.dob || undefined,
+        idType: "NATIONAL_ID",
+        idNumber: newCust.nationalId.trim(),
+      });
+      const added = customerToDesk(res.customer);
+      setCustomers(prev => [added, ...prev]);
+      setSelectedCustId(added.id);
+      setEditCustMode(null);
+      addNotification("New Customer Registered", `${added.name} saved to the database.`, "success");
+      setNewCust({ name: "", email: "", phone: "", nationalId: "", address: "", dob: "" });
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to register customer.");
     }
-
-    const added = {
-      id: "cust-" + Date.now(),
-      ...newCust,
-      fingerprintCaptured: false,
-      fingerprintVerified: false,
-      signatureCaptured: false,
-      visits: 1
-    };
-    setCustomers(prev => [added, ...prev]);
-    setSelectedCustId(added.id);
-    setEditCustMode(null);
-    addNotification("New Customer Registered", `${added.name} successfully inserted into local schema registry.`, "success");
-    setNewCust({ name: "", email: "", phone: "", nationalId: "", address: "", dob: "" });
   };
 
-  const handleUpdateCustomer = (id: string) => {
+  const handleUpdateCustomer = async (id: string) => {
     if (!newCust.name.trim()) {
       alert("Validation Failed: Name is required.");
       return;
     }
-    // Duplicate check on update (exclude current item)
-    const exists = customers.find(c => 
-      c.id !== id && (
-        c.nationalId.trim().toLowerCase() === newCust.nationalId.trim().toLowerCase() ||
-        c.phone.replace(/[\s()+-]/g, "") === newCust.phone.replace(/[\s()+-]/g, "")
-      )
-    );
-    if (exists) {
-      alert(`⚠️ DUPLICATE DETECTED\n\nAnother customer record matching this National ID or Phone already exists under the name of "${exists.name}".`);
-      return;
+    try {
+      const res = await customersApi.update(id, {
+        fullName: newCust.name.trim(),
+        email: newCust.email || undefined,
+        phone: newCust.phone.trim(),
+        address: newCust.address || undefined,
+        dateOfBirth: newCust.dob || undefined,
+        idNumber: newCust.nationalId.trim() || undefined,
+      });
+      const updated = customerToDesk(res.customer);
+      setCustomers(prev => prev.map(c => c.id === id ? updated : c));
+      setEditCustMode(null);
+      addNotification("Customer Profile Updated", "Record saved to the database.", "info");
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to update customer.");
     }
-
-    setCustomers(prev => prev.map(c => c.id === id ? { ...c, ...newCust } : c));
-    setEditCustMode(null);
-    addNotification("Customer Profile Updated", "Primary registry index modified safely.", "info");
   };
 
   // Documents Logic
-  const handleCreateDocument = (e: React.FormEvent) => {
+  const handleCreateDocument = async (e: React.FormEvent) => {
     e.preventDefault();
-    const created: NotaryDocument = {
-      id: "doc-" + Date.now(),
-      tenant_id: "",
-      branch_id: "",
-      customer_id: null,
-      processed_by: null,
-      reviewed_by: null,
-      document_number: `DOC-${Date.now()}`,
-      title: `${(newDoc as any)?.type ?? "Document"} - ${(newDoc as any)?.principal ?? "Unnamed Party"}`,
-      doc_type: "OTHER",
-      status: "draft",
-      content: (newDoc as any)?.content ?? "",
-      summary: null,
-      jurisdiction: null,
-      language: "en",
-      file_url: null,
-      seal_code: null,
-      ai_generated: false,
-      issued_at: null,
-      expires_at: null,
-      signed_at: null,
-      notarised_at: null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      is_deleted: false,
-    };
-    setLocalDocs(prev => [created, ...prev]);
-    addNotification("Document Draft Created", `Draft format saved: "${created.title}".`, "info");
-  };
-
-  const handleEditDocumentSave = () => {
-    if (!editDocId) return;
-    setLocalDocs(prev => prev.map(d => d.id === editDocId ? { ...d, content: editDocContent } : d));
-    setEditDocId(null);
-    addNotification("Draft Saved", "Prose body updated on internal schema buffers.", "info");
-  };
-
-  const handleDeleteDocument = (id: string) => {
-    const doc = localDocs.find(d => d.id === id);
-    if (doc?.status === "completed" || doc?.status === "archived") {
-      alert("❌ Regulatory Block: Certified/Notarized legal documents cannot be permanently deleted from the Veritas ledger under Compliance Code 44-B.");
+    if (!branchId) {
+      alert("No branch assigned to your account. Contact your company admin.");
       return;
     }
-    setLocalDocs(prev => prev.map(d => d.id === id ? { ...d, is_deleted: true, deleted_at: new Date().toISOString(), deleted_by: "EMPLOYEE" } : d));
-    addNotification("Document Draft Archived", "Temporary local buffer labeled as soft-deleted.", "warn");
+    const docType = ((newDoc as any)?.type ?? "OTHER").toUpperCase().replace(/ /g, "_") as NotaryDocument["doc_type"];
+    const title = `${(newDoc as any)?.type ?? "Document"} - ${(newDoc as any)?.principal ?? "Unnamed Party"}`;
+    try {
+      const res = await documentsApi.create({
+        branchId,
+        title,
+        docType: docType.includes("_") ? docType as NotaryDocument["doc_type"] : "OTHER",
+        content: (newDoc as any)?.content ?? "",
+      });
+      setLocalDocs(prev => [res.document, ...prev]);
+      addNotification("Document Draft Created", `Draft saved: "${res.document.title}".`, "info");
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to create document.");
+    }
+  };
+
+  const handleEditDocumentSave = async () => {
+    if (!editDocId) return;
+    try {
+      const res = await documentsApi.update(editDocId, { content: editDocContent });
+      setLocalDocs(prev => prev.map(d => d.id === editDocId ? res.document : d));
+      setEditDocId(null);
+      addNotification("Draft Saved", "Document content updated in the database.", "info");
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to save document.");
+    }
+  };
+
+  const handleDeleteDocument = async (id: string) => {
+    const doc = localDocs.find(d => d.id === id);
+    if (doc?.status === "signed" || doc?.status === "notarised") {
+      alert("Certified/notarised documents cannot be deleted.");
+      return;
+    }
+    try {
+      await documentsApi.delete(id);
+      setLocalDocs(prev => prev.filter(d => d.id !== id));
+      addNotification("Document Archived", "Document removed from active records.", "warn");
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to delete document.");
+    }
   };
 
   const handlePrintDocument = (docTitle: string) => {
@@ -316,38 +433,98 @@ export default function EmployeePortal({
   };
 
   // Appointments Logic
-  const handleCreateAppointment = (e: React.FormEvent) => {
+  const handleCreateAppointment = async (e: React.FormEvent) => {
     e.preventDefault();
-    const added = {
-      id: "ap-" + Date.now(),
-      customer_name: appForm.customer_name || "Anonymous Customer",
-      service_type: appForm.service_type,
-      appointmentTime: `${appForm.date} @ ${appForm.time}`,
-      status: "scheduled" as const
-    };
-    setLocalAppointments(prev => [added, ...prev]);
-    addNotification("Appointment Scheduled", `${added.customer_name} set for ${added.appointmentTime}`, "info");
-    setAppForm({ customer_name: "", service_type: "Power of Attorney", date: "", time: "" });
-  };
-
-  const handleReschedule = (id: string) => {
-    const promptTime = prompt("Enter new schedule text (e.g. 2026-06-15 @ 04:30 PM):");
-    if (promptTime) {
-      setLocalAppointments(prev => prev.map(ap => ap.id === id ? { ...ap, appointmentTime: promptTime } : ap));
-      addNotification("Appointment Rescheduled", "Calendar schedules synchronized.", "info");
+    if (!branchId) {
+      alert("No branch assigned to your account. Contact your administrator.");
+      return;
+    }
+    try {
+      const res = await appointmentsApi.create({
+        branchId,
+        customerName: appForm.customer_name || "Anonymous Customer",
+        serviceType: appForm.service_type,
+        appointmentDate: appForm.date,
+        appointmentTime: appForm.time,
+      });
+      const ui = toUiAppointment(res.appointment);
+      setLocalAppointments(prev => [{
+        id: ui.id,
+        customer_name: ui.customerName,
+        service_type: ui.serviceType,
+        appointmentTime: ui.appointmentTime,
+        status: ui.status,
+      }, ...prev]);
+      addNotification("Appointment Scheduled", `${ui.customerName} set for ${ui.appointmentTime}`, "info");
+      setAppForm({ customer_name: "", service_type: "Power of Attorney", date: "", time: "" });
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to book appointment.");
     }
   };
 
-  // handleCheckInCustomer: superseded by QueuePanel -> queueApi.checkIn()
-  const handleCheckInCustomer = (_customer_name: string, _service_type: string) => {
+  const handleReschedule = async (id: string) => {
+    const newDate = prompt("Enter new date (YYYY-MM-DD):");
+    if (!newDate) return;
+    const newTime = prompt("Enter new time (e.g. 10:30 AM):");
+    if (!newTime) return;
+    try {
+      const res = await appointmentsApi.update(id, {
+        appointmentDate: newDate,
+        appointmentTime: newTime,
+      });
+      const ui = toUiAppointment(res.appointment);
+      setLocalAppointments(prev => prev.map(ap => ap.id === id ? {
+        id: ui.id,
+        customer_name: ui.customerName,
+        service_type: ui.serviceType,
+        appointmentTime: ui.appointmentTime,
+        status: ui.status,
+      } : ap));
+      addNotification("Appointment Rescheduled", "Calendar schedules synchronized.", "info");
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to reschedule appointment.");
+    }
+  };
+
+  const handleCancelAppointment = async (id: string, customerName: string) => {
+    try {
+      await appointmentsApi.transition(id, "cancelled");
+      setLocalAppointments(prev => prev.map(a => a.id === id ? { ...a, status: "canceled" as const } : a));
+      addNotification("Booking Canceled", `Canceled schedule for ${customerName}`, "warn");
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to cancel appointment.");
+    }
+  };
+
+  const handleCheckInCustomer = async (appointmentId: string, customer_name: string, service_type: string) => {
+    try {
+      await appointmentsApi.transition(appointmentId, "checked_in");
+      setLocalAppointments(prev => prev.map(a => a.id === appointmentId ? { ...a, status: "checked_in" } : a));
+    } catch (err) {
+      console.warn("[EmployeePortal] Check-in status sync failed:", err);
+    }
+    try {
+      const res = await queueApi.checkIn({
+        customerName: customer_name,
+        serviceType: service_type,
+        branchId,
+      });
+      setLocalQueue(prev => [...prev, res.ticket]);
+      addNotification(
+        "Customer Checked In",
+        `Assigned slot ${res.ticket.ticket_number} for ${customer_name} on queue monitor.`,
+        "success"
+      );
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to issue queue ticket.");
+      return;
+    }
     setActiveTab("queue");
   };
 
-  // handleIssueManualTicket: superseded by QueuePanel -> queueApi.checkIn()
   const handleIssueManualTicket = (e: React.FormEvent) => {
     e.preventDefault();
-    setActiveTab("queue"); // redirect to real queue panel
-    // Ticket creation is now handled by QueuePanel -> queueApi.checkIn()
+    setActiveTab("queue");
     setAppForm({ customer_name: "", service_type: "Power of Attorney", date: "", time: "" });
   };
 
@@ -382,24 +559,61 @@ export default function EmployeePortal({
   };
 
   // AI Questionnaire Builder logic
-  const handleTriggerAIPowerBuilder = () => {
+  const handleTriggerAIPowerBuilder = async () => {
     if (!qaParams.grantor || !qaParams.receiver) {
       alert("AI Drafter requires Grantor and Receiver names specified.");
       return;
     }
+    if (!branchId) {
+      alert("No branch assigned to your account. Contact your company admin.");
+      return;
+    }
     setAiDraftLoading(true);
-    setTimeout(() => {
-      const result = `POWER OF ATTORNEY\nJURISDICTION: ${docJurisdiction || "Illinois (Cook County)"}\n\nKNOW ALL MEN BY THESE PRESENTS, that I, ${qaParams.grantor}, residing as the Legal Principal, hereby grant absolute Power of Attorney powers to ${qaParams.receiver} to administer ${qaParams.purpose || "general bank transactions and estate properties"} on my behalf.\n\nThis authority shall extend for a duration of ${qaParams.duration || "One (1) Calendar year"} and shall remain durable notwithstanding subsequent legal incapacitation.\n\nSEALED & WITNESSED: ____________________`;
-      setAiDraftResults(result);
-      setAiDraftLoading(false);
-      // Auto populate into primary document creation body
-      (setNewDoc as any)({
-        title: `AI Generated Power of Attorney - ${qaParams.grantor}`,
-        type: "Power of Attorney",
-        content: result
+    try {
+      const token = getAccessToken();
+      const aiRes = await fetch("/api/gemini/generate-doc", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          templateType: aiDocType,
+          parties: [qaParams.grantor, qaParams.receiver],
+          jurisdiction: docJurisdiction || "Somalia",
+          specialClauses: qaParams.purpose,
+          customPrompt: qaParams.duration ? `Duration: ${qaParams.duration}` : undefined,
+        }),
       });
-      addNotification("AI Power of Attorney Compiled", "Document template loaded.", "success");
-    }, 1500);
+      const aiData = await aiRes.json();
+      if (!aiData.success) throw new Error(aiData.error ?? "AI generation failed");
+
+      const docRes = await documentsApi.create({
+        branchId,
+        title: `${aiDocType} — ${qaParams.grantor}`,
+        docType: "POWER_OF_ATTORNEY",
+        content: aiData.document,
+        summary: `${aiDocType} between ${qaParams.grantor} and ${qaParams.receiver}`,
+        jurisdiction: docJurisdiction || "Somalia",
+        aiGenerated: true,
+      });
+
+      setAiDraftResults(aiData.document);
+      setLocalDocs(prev => [docRes.document, ...prev]);
+      setNewDoc({
+        title: docRes.document.title,
+        type: aiDocType,
+        principal: qaParams.grantor,
+        parties: qaParams.receiver,
+        content: aiData.document,
+      });
+      addNotification("AI Document Compiled", `${docRes.document.document_number} saved as draft.`, "success");
+    } catch (err: any) {
+      alert(err.message ?? "AI generation failed. Check GEMINI_API_KEY configuration.");
+    } finally {
+      setAiDraftLoading(false);
+    }
   };
 
   // Interactive AI Desk bot logic
@@ -412,9 +626,14 @@ export default function EmployeePortal({
     setAiTerminalLoading(true);
 
     try {
+      const token = getAccessToken();
       const response = await fetch("/api/gemini/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: "include",
         body: JSON.stringify({
           messages: [{ role: "user", content: userMsg }]
         })
@@ -837,7 +1056,7 @@ export default function EmployeePortal({
 
           {/* TAB 2: QUEUE MANAGEMENT SYSTEM */}
           {activeTab === "queue" && (
-            <QueuePanel />
+            <QueuePanel branchId={branchId} />
           )}
 
           {/* TAB 3: BOOKINGS & CALENDAR COORDINATOR */}
@@ -865,16 +1084,13 @@ export default function EmployeePortal({
                       <div className="flex flex-col gap-1 shrink-0">
                         {ap.status === "scheduled" && (
                           <>
-                            <button onClick={() => handleCheckInCustomer(ap.customer_name, ap.service_type)} className="bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold py-1 px-2.5 rounded transition">
+                            <button onClick={() => handleCheckInCustomer(ap.id, ap.customer_name, ap.service_type)} className="bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold py-1 px-2.5 rounded transition">
                               Check In Lobby
                             </button>
                             <button onClick={() => handleReschedule(ap.id)} className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-[10px] font-bold py-1 px-2.5 rounded transition">
                               Reschedule
                             </button>
-                            <button onClick={() => {
-                              setLocalAppointments(prev => prev.map(a => a.id === ap.id ? { ...a, status: "canceled" as const } : a));
-                              addNotification("Booking Canceled", `Canceled schedule for ${ap.customer_name}`, "warn");
-                            }} className="bg-white hover:bg-red-50 hover:text-red-600 text-slate-400 border border-slate-200 text-[10px] py-1 px-2.5 rounded transition">
+                            <button onClick={() => handleCancelAppointment(ap.id, ap.customer_name)} className="bg-white hover:bg-red-50 hover:text-red-600 text-slate-400 border border-slate-200 text-[10px] py-1 px-2.5 rounded transition">
                               Cancel Booking
                             </button>
                           </>
@@ -1398,21 +1614,28 @@ export default function EmployeePortal({
                   </p>
 
                   <div className="space-y-3 pt-1">
-                    <button onClick={() => onIdentityOcrScan(0)} disabled={ocrLoading} className="w-full text-left bg-slate-50 border border-slate-200 p-3.5 rounded-xl hover:border-blue-500 transition shadow-xs flex items-center gap-3">
+                    <input
+                      ref={ocrFileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleOcrFileSelect}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => ocrFileInputRef.current?.click()}
+                      disabled={effectiveOcrLoading}
+                      className="w-full text-left bg-slate-50 border border-slate-200 p-3.5 rounded-xl hover:border-blue-500 transition shadow-xs flex items-center gap-3"
+                    >
                       <Scan className="w-5 h-5 text-blue-600 shrink-0" />
                       <div>
-                        <h6 className="font-bold text-slate-800 text-xs">US Passport Sample</h6>
-                        <span className="text-[9px] text-slate-450 font-mono">— scan an ID to populate —</span>
+                        <h6 className="font-bold text-slate-800 text-xs">Scan ID Document</h6>
+                        <span className="text-[9px] text-slate-450 font-mono">Upload passport, national ID, or license photo</span>
                       </div>
                     </button>
-
-                    <button onClick={() => onIdentityOcrScan(1)} disabled={ocrLoading} className="w-full text-left bg-slate-50 border border-slate-200 p-3.5 rounded-xl hover:border-blue-500 transition shadow-xs flex items-center gap-3">
-                      <Scan className="w-5 h-5 text-blue-600 shrink-0" />
-                      <div>
-                        <h6 className="font-bold text-slate-800 text-xs">German ID Sample</h6>
-                        <span className="text-[9px] text-slate-450 font-mono">KLAUS SCHMIDT - National ID: D89420B11</span>
-                      </div>
-                    </button>
+                    {branchName && (
+                      <p className="text-[9px] text-slate-400 font-mono">Branch: {branchName}</p>
+                    )}
                   </div>
                 </div>
 
@@ -1420,14 +1643,14 @@ export default function EmployeePortal({
                 <div className="bg-white border border-slate-200 p-5 rounded-xl shadow-sm flex flex-col justify-between">
                   <div>
                     <span className="text-[10px] font-mono text-slate-400 block uppercase font-bold mb-3">ID Extractions Output</span>
-                    {ocrLoading ? (
+                    {effectiveOcrLoading ? (
                       <div className="py-12 text-center text-xs text-slate-400 italic">Processing high-speed OCR parsing...</div>
-                    ) : ocrData ? (
+                    ) : effectiveOcrData ? (
                       <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl text-xs space-y-2 font-mono">
                         <span className="font-extrabold text-blue-800 block">✓ Extraction successful</span>
-                        <p className="text-slate-900 font-bold">Name: {ocrData.fullName}</p>
-                        <p className="text-slate-900">ID Code: {ocrData.documentNumber}</p>
-                        <p className="text-slate-900">DOB: {ocrData.dob}</p>
+                        <p className="text-slate-900 font-bold">Name: {effectiveOcrData.fullName}</p>
+                        <p className="text-slate-900">ID Code: {effectiveOcrData.documentNumber}</p>
+                        <p className="text-slate-900">DOB: {effectiveOcrData.dob}</p>
                         <span className="text-[9px] text-slate-500 block">Values automatically saved to registration form state.</span>
                       </div>
                     ) : (

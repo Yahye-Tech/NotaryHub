@@ -212,6 +212,87 @@ export async function getDocumentById(
   return rows[0] ?? null;
 }
 
+export async function getDocumentsForCustomer(
+  tenantId: string,
+  customerUserId: string,
+  customerEmail: string,
+  filters: {
+    status?: DocumentStatus;
+    limit?: number;
+    offset?: number;
+  } = {}
+): Promise<{ documents: DocumentRecord[]; total: number }> {
+  const conditions = [
+    "d.tenant_id = $1",
+    "d.is_deleted = FALSE",
+    `EXISTS (
+      SELECT 1 FROM customers c
+      WHERE c.id = d.customer_id
+        AND c.tenant_id = $1
+        AND c.is_deleted = FALSE
+        AND (c.user_id = $2 OR c.email ILIKE $3)
+    )`,
+  ];
+  const params: unknown[] = [tenantId, customerUserId, customerEmail];
+  let p = 4;
+
+  if (filters.status) {
+    conditions.push(`d.status = $${p++}`);
+    params.push(filters.status);
+  }
+
+  const where = conditions.join(" AND ");
+  const limit = filters.limit ?? 50;
+  const offset = filters.offset ?? 0;
+
+  const { rows } = await query<DocumentRecord>(
+    `SELECT
+       d.*,
+       c.full_name   AS customer_name,
+       pb.full_name  AS processed_by_name,
+       rb.full_name  AS reviewed_by_name
+     FROM documents d
+     LEFT JOIN customers c ON c.id = d.customer_id
+     LEFT JOIN users pb ON pb.id = d.processed_by
+     LEFT JOIN users rb ON rb.id = d.reviewed_by
+     WHERE ${where}
+     ORDER BY d.created_at DESC
+     LIMIT $${p} OFFSET $${p + 1}`,
+    [...params, limit, offset]
+  );
+
+  const { rows: countRows } = await query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM documents d WHERE ${where}`,
+    params
+  );
+
+  return {
+    documents: rows,
+    total: parseInt(countRows[0]?.count ?? "0", 10),
+  };
+}
+
+export async function customerOwnsDocument(
+  tenantId: string,
+  documentId: string,
+  customerUserId: string,
+  customerEmail: string
+): Promise<boolean> {
+  const { rows } = await query<{ id: string }>(
+    `SELECT d.id
+     FROM documents d
+     JOIN customers c ON c.id = d.customer_id
+     WHERE d.id = $1
+       AND d.tenant_id = $2
+       AND d.is_deleted = FALSE
+       AND c.is_deleted = FALSE
+       AND (c.user_id = $3 OR c.email ILIKE $4)
+     LIMIT 1`,
+    [documentId, tenantId, customerUserId, customerEmail]
+  );
+  return rows.length > 0;
+}
+
 // ─── Create ────────────────────────────────────────────────────────────────────
 
 export interface CreateDocumentInput {

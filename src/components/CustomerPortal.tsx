@@ -1,7 +1,7 @@
 type Invoice = { id: string; invoiceNumber?: string; customerName: string; amount: number; dueDate: string; status: string; items?: { description: string; price: number }[] };
 type Appointment = { id: string; branchId?: string; customerName: string; serviceType: string; appointmentTime: string; status: string; customerEmail?: string };
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { 
   User, Calendar, Clock, CreditCard, ShieldCheck, Download, 
   QrCode, RefreshCw, CheckCircle, PlusCircle, XCircle, Trash2, 
@@ -11,6 +11,33 @@ import {
   Building, MapPin, ShieldAlert, ArrowRight, Printer, AlertTriangle, CheckSquare, Menu, X, Sun, Moon
 } from "lucide-react";
 import { Branch, NotaryDocument } from "../types";
+import { appointmentsApi, toUiAppointment } from "../api/appointments.api";
+import { uploadsApi, toUiUploadedFile } from "../api/uploads.api";
+import { documentsApi } from "../api/documents.api";
+import { ApiException } from "../api/client";
+
+function formatDocumentStatusLabel(status: string): string {
+  return status.replace(/_/g, " ").replace(/-/g, " ");
+}
+
+function getDocumentStatusClass(status: string): string {
+  switch (status) {
+    case "notarised":
+    case "completed":
+      return "bg-emerald-100 text-emerald-800";
+    case "signed":
+    case "approved":
+    case "pending_review":
+    case "pending-signature":
+      return "bg-amber-100 text-amber-850";
+    case "rejected":
+    case "revoked":
+    case "expired":
+      return "bg-red-100 text-red-800";
+    default:
+      return "bg-blue-100 text-blue-800";
+  }
+}
 
 interface CustomerPortalProps {
   branches: Branch[];
@@ -69,6 +96,31 @@ export default function CustomerPortal({
   const [customerPassword, setCustomerPassword] = useState("••••••••••••");
   const [avatarUrl, setAvatarUrl] = useState("https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150");
 
+  const [bookedAppointments, setBookedAppointments] = useState<Appointment[]>(appointments);
+  const [bookingSubmitting, setBookingSubmitting] = useState(false);
+
+  const loadAppointments = useCallback(async () => {
+    try {
+      const res = await appointmentsApi.list({ limit: 50 });
+      setBookedAppointments(res.appointments.map(a => {
+        const ui = toUiAppointment(a);
+        return {
+          id: ui.id,
+          branchId: ui.branchId,
+          customerName: ui.customerName,
+          serviceType: ui.serviceType,
+          appointmentTime: ui.appointmentTime,
+          status: ui.status,
+          customerEmail: ui.customerEmail,
+        };
+      }));
+    } catch (err) {
+      console.error("[CustomerPortal] Failed to load appointments:", err);
+    }
+  }, []);
+
+  useEffect(() => { loadAppointments(); }, [loadAppointments]);
+
   // Notifications channels preferences
   const [channelPrefs, setChannelPrefs] = useState({
     inApp: true,
@@ -84,44 +136,31 @@ export default function CustomerPortal({
     identity: true
   });
 
-  // Mock initial documents context
-  const [customerDocuments, setCustomerDocuments] = useState<NotaryDocument[]>([
-    {
-      id: "doc-101",
-      title: "Power of Attorney (Agent Authorization)",
-      status: "completed",
-      parties: ["Ahmed Ali", "Farah Omar"],
-      content: "DURABLE POWER OF ATTORNEY\n\nI, Ahmed Ali, constitute Farah Omar my legal representative with absolute authorization regarding banking, deed execution, and physical property clearance in Bosaso branch territory...",
-      createdAt: "2026-06-10",
-      watermarkCode: "VERITAS-SEC-8820",
-      hash: "8ae7c1b5055b8ef98cf85d564fa72c3b"
-    },
-    {
-      id: "doc-102",
-      title: "Affidavit of Dual Residency Certification",
-      status: "pending-signature", // mapped dynamically to progress: "Under Review" / "Verification"
-      parties: ["Ahmed Ali"],
-      content: "AFFIDAVIT OF DUAL RESIDENCY\n\nI, Ahmed Ali, declare on sworn oath that I hold active residence records across Federal States of Somalia. Subscribed to notary verification desk...",
-      createdAt: "2026-06-11",
-      watermarkCode: "VERITAS-SEC-9241"
-    },
-    {
-      id: "doc-103",
-      title: "Corporate Authorization Placement Letter",
-      status: "draft", // mapped dynamically: ready for pickup
-      parties: ["Ahmed Ali", "Hassan Corp Ltd"],
-      content: "AUTHORIZATION LETTER COVENANT\n\nThis letter formally authorizes representative courier pickup of registered customs and shipping container licenses within Bosaso Port Terminal...",
-      createdAt: "2026-06-12"
-    }
-  ]);
+  // Customer documents loaded from API
+  const [customerDocuments, setCustomerDocuments] = useState<NotaryDocument[]>([]);
+  const [documentsLoading, setDocumentsLoading] = useState(true);
+  const [selectedDoc, setSelectedDoc] = useState<NotaryDocument | null>(null);
 
-  // Unified documents list (combining prop documents + local mocks with custom styling IDs)
+  const loadDocuments = useCallback(async () => {
+    setDocumentsLoading(true);
+    try {
+      const res = await documentsApi.list({ limit: 50 });
+      setCustomerDocuments(res.documents);
+      if (res.documents.length > 0) {
+        setSelectedDoc(res.documents[0]);
+      }
+    } catch (err) {
+      console.error("[CustomerPortal] Failed to load documents:", err);
+    } finally {
+      setDocumentsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadDocuments(); }, [loadDocuments]);
+
   const allDocs = [...documents, ...customerDocuments].filter(
     (v, i, a) => a.findIndex(t => t.id === v.id) === i
   );
-
-  // Active selected document for deep status tracking detail view
-  const [selectedDoc, setSelectedDoc] = useState<NotaryDocument | null>(allDocs[0] || null);
 
   // QR Verification engine fields
   const [qrInputCode, setQrInputCode] = useState("");
@@ -198,12 +237,25 @@ export default function CustomerPortal({
   const [supportInput, setSupportInput] = useState("");
 
   // Uploaded Files State
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([
-    { id: "up-221", name: "National_ID_Ahmed_Ali.pdf", type: "National ID", size: "1.2 MB", uploadedAt: "2026-06-11" },
-    { id: "up-222", name: "Utility_Bill_Chicago_Residency.jpg", type: "Utility Bill", size: "840 KB", uploadedAt: "2026-06-11" }
-  ]);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [uploadLoading, setUploadLoading] = useState(false);
+  const [uploadSubmitting, setUploadSubmitting] = useState(false);
   const [targetUploadCategory, setTargetUploadCategory] = useState("National ID");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const loadUploads = useCallback(async () => {
+    setUploadLoading(true);
+    try {
+      const res = await uploadsApi.list({ limit: 50 });
+      setUploadedFiles(res.uploads.map(toUiUploadedFile));
+    } catch (err) {
+      console.error("[CustomerPortal] Failed to load uploads:", err);
+    } finally {
+      setUploadLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadUploads(); }, [loadUploads]);
   const [isDragging, setIsDragging] = useState(false);
 
   // Invoices list (Combines local with prop-driven)
@@ -252,27 +304,66 @@ export default function CustomerPortal({
   }, [aiAssistantChats]);
 
   // Handlers
-  const handleAddNewApp = (e: React.FormEvent) => {
+  const handleAddNewApp = async (e: React.FormEvent) => {
     e.preventDefault();
-    onBookAppointment(bookingBranchId, customerName, customerEmail, bookingService, `${bookingDate} @ ${bookingTime}`);
-    
-    // Add success notification
-    const branchName = branches.find(b => b.id === bookingBranchId)?.name || "Bosaso Main Branch";
-    setNotifications(prev => [
-      {
-        id: "not-" + Date.now(),
-        title: "Appointment Booked Successfully",
-        text: `Your ${bookingService} appointment at ${branchName} is scheduled for ${bookingDate} at ${bookingTime}.`,
-        channel: "In-App",
-        time: "Just now",
-        unread: true
-      },
-      ...prev
-    ]);
+    if (!bookingBranchId) {
+      alert("Please select a branch for your appointment.");
+      return;
+    }
+    setBookingSubmitting(true);
+    try {
+      await appointmentsApi.create({
+        branchId: bookingBranchId,
+        customerName,
+        customerEmail,
+        serviceType: bookingService,
+        appointmentDate: bookingDate,
+        appointmentTime: bookingTime,
+      });
+      onBookAppointment(bookingBranchId, customerName, customerEmail, bookingService, `${bookingDate} @ ${bookingTime}`);
+      await loadAppointments();
 
-    alert(`✓ Appointment Draft Synchronized!\nYour booking for ${bookingService} was recorded on the Veritas Ledger.\nDate: ${bookingDate}\nTime: ${bookingTime}\nBranch: ${branchName}`);
-    setBookingStep(1); // Reset step 
-    setActiveTab("dashboard"); // Go back to dashboard to review
+      const branchName = branches.find(b => b.id === bookingBranchId)?.name || "Bosaso Main Branch";
+      setNotifications(prev => [
+        {
+          id: "not-" + Date.now(),
+          title: "Appointment Booked Successfully",
+          text: `Your ${bookingService} appointment at ${branchName} is scheduled for ${bookingDate} at ${bookingTime}.`,
+          channel: "In-App",
+          time: "Just now",
+          unread: true
+        },
+        ...prev
+      ]);
+
+      alert(`✓ Appointment Booked!\nYour booking for ${bookingService} was recorded.\nDate: ${bookingDate}\nTime: ${bookingTime}\nBranch: ${branchName}`);
+      setBookingStep(1);
+      setActiveTab("dashboard");
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to book appointment.");
+    } finally {
+      setBookingSubmitting(false);
+    }
+  };
+
+  const handleCancelAppointment = async (id: string) => {
+    try {
+      await appointmentsApi.transition(id, "cancelled");
+      setBookedAppointments(prev => prev.map(a => a.id === id ? { ...a, status: "canceled" } : a));
+      setNotifications(prev => [
+        {
+          id: "not-" + Date.now(),
+          title: "Appointment Canceled",
+          text: "Your appointment was canceled and the branch has been notified.",
+          channel: "In-App",
+          time: "Just now",
+          unread: true
+        },
+        ...prev
+      ]);
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to cancel appointment.");
+    }
   };
 
   const executeQRVerification = (customCode?: string) => {
@@ -282,9 +373,10 @@ export default function CustomerPortal({
       return;
     }
 
-    const matched = allDocs.find(d => 
-      d.id.toLowerCase().includes(code.toLowerCase()) || 
-      d.watermarkCode?.toLowerCase().includes(code.toLowerCase()) ||
+    const matched = allDocs.find(d =>
+      d.id.toLowerCase().includes(code.toLowerCase()) ||
+      d.document_number?.toLowerCase().includes(code.toLowerCase()) ||
+      d.seal_code?.toLowerCase().includes(code.toLowerCase()) ||
       code.toUpperCase() === "DOC-2026-00123"
     );
 
@@ -404,32 +496,53 @@ export default function CustomerPortal({
       handleFiles(e.target.files);
     }
   };
-  const handleFiles = (files: FileList) => {
+  const handleFiles = async (files: FileList) => {
     const file = files[0];
-    const newUpFile: UploadedFile = {
-      id: "up-" + Math.floor(Math.random() * 900 + 100),
-      name: file.name,
-      type: targetUploadCategory,
-      size: (file.size / 1024).toFixed(0) + " KB",
-      uploadedAt: new Date().toISOString().substring(0, 10)
-    };
-    setUploadedFiles(prev => [newUpFile, ...prev]);
-    // Notify
-    setNotifications(prev => [
-      {
-        id: "not-" + Date.now(),
-        title: "Attachment Uploaded",
-        text: `Successfully uploaded ${file.name} as certified ${targetUploadCategory}.`,
-        channel: "In-App",
-        time: "Just now",
-        unread: true
-      },
-      ...prev
-    ]);
+    if (!file) return;
+    setUploadSubmitting(true);
+    try {
+      const res = await uploadsApi.upload(file, targetUploadCategory);
+      setUploadedFiles(prev => [toUiUploadedFile(res.upload), ...prev]);
+      setNotifications(prev => [
+        {
+          id: "not-" + Date.now(),
+          title: "Attachment Uploaded",
+          text: `Successfully uploaded ${file.name} as certified ${targetUploadCategory}.`,
+          channel: "In-App",
+          time: "Just now",
+          unread: true
+        },
+        ...prev
+      ]);
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to upload file.");
+    } finally {
+      setUploadSubmitting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   };
 
-  const deleteUploadedFile = (id: string) => {
-    setUploadedFiles(prev => prev.filter(f => f.id !== id));
+  const deleteUploadedFile = async (id: string) => {
+    try {
+      await uploadsApi.delete(id);
+      setUploadedFiles(prev => prev.filter(f => f.id !== id));
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to delete file.");
+    }
+  };
+
+  const downloadUploadedFile = async (id: string, name: string) => {
+    try {
+      const blob = await uploadsApi.download(id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = name;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to download file.");
+    }
   };
 
   // Mapping of dynamic progress bars based on document status
@@ -437,10 +550,23 @@ export default function CustomerPortal({
     switch (status) {
       case "draft":
         return { percent: 20, step: "Submitted" };
-      case "pending-signature":
+      case "pending_review":
+        return { percent: 40, step: "Under Review" };
+      case "approved":
         return { percent: 60, step: "Verification" };
+      case "signed":
+        return { percent: 80, step: "Awaiting Notarisation" };
+      case "notarised":
       case "completed":
         return { percent: 100, step: "Completed" };
+      case "rejected":
+        return { percent: 0, step: "Rejected" };
+      case "expired":
+        return { percent: 0, step: "Expired" };
+      case "revoked":
+        return { percent: 0, step: "Revoked" };
+      case "pending-signature":
+        return { percent: 60, step: "Verification" };
       default:
         return { percent: 40, step: "Under Review" };
     }
@@ -722,35 +848,23 @@ export default function CustomerPortal({
                   <span className="text-[10px] font-mono text-slate-400 block uppercase font-bold tracking-wider">Recent Document Files</span>
                   
                   <div className="space-y-2">
-                    <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl flex justify-between items-center text-xs">
-                      <div>
-                        <span className="font-bold text-slate-900 block font-sans">Power of Attorney Authorization</span>
-                        <span className="text-[10px] text-slate-400 block font-mono">ID: DOC-2016-00123</span>
+                    {documentsLoading && (
+                      <div className="py-6 text-center text-xs text-slate-400">Loading your documents…</div>
+                    )}
+                    {!documentsLoading && allDocs.length === 0 && (
+                      <div className="py-6 text-center text-xs text-slate-400 italic">No documents on file yet.</div>
+                    )}
+                    {!documentsLoading && allDocs.slice(0, 3).map(doc => (
+                      <div key={doc.id} className="p-3 bg-slate-50 border border-slate-100 rounded-xl flex justify-between items-center text-xs">
+                        <div>
+                          <span className="font-bold text-slate-900 block font-sans">{doc.title}</span>
+                          <span className="text-[10px] text-slate-400 block font-mono">ID: {doc.document_number}</span>
+                        </div>
+                        <span className={`px-2.5 py-0.5 rounded-full font-sans font-bold text-[10px] border ${getDocumentStatusClass(doc.status)}`}>
+                          {formatDocumentStatusLabel(doc.status)}
+                        </span>
                       </div>
-                      <span className="bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full font-sans font-bold text-[10px] border border-emerald-150">
-                        Completed
-                      </span>
-                    </div>
-
-                    <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl flex justify-between items-center text-xs">
-                      <div>
-                        <span className="font-bold text-slate-900 block font-sans">Affidavit of Dual Residency Declaration</span>
-                        <span className="text-[10px] text-slate-400 block font-mono">ID: DOC-2026-00124</span>
-                      </div>
-                      <span className="bg-amber-50 text-amber-700 px-2.5 py-0.5 rounded-full font-sans font-bold text-[10px] border border-amber-150">
-                        Pending Review
-                      </span>
-                    </div>
-
-                    <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl flex justify-between items-center text-xs">
-                      <div>
-                        <span className="font-bold text-slate-900 block font-sans">Authorization Letter of Agent Pickup</span>
-                        <span className="text-[10px] text-slate-400 block font-mono">ID: DOC-2026-00125</span>
-                      </div>
-                      <span className="bg-blue-50 text-blue-700 px-2.5 py-0.5 rounded-full font-sans font-bold text-[10px] border border-blue-150">
-                        Ready for Pickup
-                      </span>
-                    </div>
+                    ))}
                   </div>
 
                   <button 
@@ -995,10 +1109,11 @@ export default function CustomerPortal({
                           Modify Parameters
                         </button>
                         <button 
-                          type="submit" 
-                          className="w-2/3 bg-emerald-600 hover:bg-emerald-550 text-white text-xs font-extrabold py-2.5 rounded-xl transition shadow-sm"
+                          type="submit"
+                          disabled={bookingSubmitting}
+                          className="w-2/3 bg-emerald-600 hover:bg-emerald-550 disabled:opacity-60 text-white text-xs font-extrabold py-2.5 rounded-xl transition shadow-sm"
                         >
-                          Confirm & Block Session ✓
+                          {bookingSubmitting ? "Booking…" : "Confirm & Block Session ✓"}
                         </button>
                       </div>
                     </form>
@@ -1040,10 +1155,11 @@ export default function CustomerPortal({
                         </button>
                         <button 
                           onClick={() => {
-                            // Non-blocking in-app cancel status indicator
-                            alert("Appointment slot canceled successfully. Host notified.");
+                            const next = bookedAppointments.find(a => a.status === "scheduled");
+                            if (next) handleCancelAppointment(next.id);
                           }}
-                          className="bg-red-50 text-[10.5px] text-red-700 hover:bg-red-100 font-bold px-2.5 py-1.5 rounded-md transition"
+                          disabled={!bookedAppointments.some(a => a.status === "scheduled")}
+                          className="bg-red-50 text-[10.5px] text-red-700 hover:bg-red-100 font-bold px-2.5 py-1.5 rounded-md transition disabled:opacity-40"
                         >
                           Cancel Appointment
                         </button>
@@ -1051,7 +1167,7 @@ export default function CustomerPortal({
                     </div>
 
                     {/* Prop-driven appointments */}
-                    {appointments.map(app => (
+                    {bookedAppointments.map(app => (
                       <div key={app.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs">
                         <div className="flex justify-between items-start">
                           <div>
@@ -1065,6 +1181,14 @@ export default function CustomerPortal({
                           <Clock className="w-3.5 h-3.5" />
                           {app.appointmentTime}
                         </div>
+                        {app.status === "scheduled" && (
+                          <button
+                            onClick={() => handleCancelAppointment(app.id)}
+                            className="mt-2 text-[10px] text-red-600 hover:text-red-800 font-bold"
+                          >
+                            Cancel
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1114,7 +1238,15 @@ export default function CustomerPortal({
 
                   {/* Table listing */}
                   <div className="space-y-3">
-                    {allDocs.map((doc, idx) => (
+                    {documentsLoading && (
+                      <div className="py-10 text-center text-xs text-slate-400">Loading document ledger…</div>
+                    )}
+                    {!documentsLoading && allDocs.length === 0 && (
+                      <div className="py-10 text-center text-xs text-slate-400 italic border border-dashed border-slate-200 rounded-xl">
+                        No documents linked to your account yet. Visit a branch to start a notarisation request.
+                      </div>
+                    )}
+                    {!documentsLoading && allDocs.map((doc) => (
                       <div 
                         key={doc.id}
                         onClick={() => setSelectedDoc(doc)}
@@ -1125,23 +1257,26 @@ export default function CustomerPortal({
                         <div className="flex justify-between items-center">
                           <div>
                             <span className="font-extrabold text-slate-900 block font-sans text-[13px]">{doc.title}</span>
-                            <span className="text-[10px] font-mono text-slate-500">ID Serial: DOC-2026-{(1000 + idx)}</span>
+                            <span className="text-[10px] font-mono text-slate-500">ID Serial: {doc.document_number}</span>
                           </div>
                           
-                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-sans font-bold uppercase ${
-                            doc.status === "completed" ? "bg-emerald-100 text-emerald-800" :
-                            doc.status === "pending-signature" ? "bg-amber-100 text-amber-850" :
-                            "bg-blue-100 text-blue-800"
-                          }`}>{doc.status}</span>
+                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-sans font-bold uppercase ${getDocumentStatusClass(doc.status)}`}>
+                            {formatDocumentStatusLabel(doc.status)}
+                          </span>
                         </div>
 
                         <div className="flex items-center justify-between text-[10px] text-slate-400 border-t border-slate-100 pt-2 font-mono">
-                          <span>Created Date: {doc.createdAt}</span>
+                          <span>Created Date: {doc.created_at?.slice(0, 10)}</span>
                           <div className="flex gap-1">
                             <button 
-                              onClick={(e) => {
+                              onClick={async (e) => {
                                 e.stopPropagation();
-                                alert(`Simulated original PDF document view for ${doc.title}. Seal Hash verified.`);
+                                try {
+                                  const res = await documentsApi.get(doc.id);
+                                  setSelectedDoc(res.document);
+                                } catch (err) {
+                                  alert(err instanceof ApiException ? err.message : "Failed to load document.");
+                                }
                               }}
                               className="text-emerald-700 hover:underline px-1 font-sans"
                             >
@@ -1150,7 +1285,11 @@ export default function CustomerPortal({
                             <button 
                               onClick={(e) => {
                                 e.stopPropagation();
-                                alert(`Executing encrypted download of document file format: PDF`);
+                                if (doc.file_url) {
+                                  window.open(doc.file_url, "_blank");
+                                } else {
+                                  alert("PDF file not yet attached. View the document content in the detail panel.");
+                                }
                               }}
                               className="text-emerald-700 hover:underline px-1 font-sans"
                             >
@@ -1159,7 +1298,7 @@ export default function CustomerPortal({
                             <button 
                               onClick={(e) => {
                                 e.stopPropagation();
-                                alert(`Printing task spooled to default systems printer.`);
+                                window.print();
                               }}
                               className="text-emerald-700 hover:underline px-1 font-sans"
                             >
@@ -1246,7 +1385,7 @@ export default function CustomerPortal({
                       {/* Content Review Area */}
                       <div className="p-3.5 bg-slate-950 text-slate-350 font-mono text-[11px] rounded-xl relative overflow-hidden max-h-56 overflow-y-auto space-y-2 border border-slate-900 leading-relaxed">
                         <span className="text-[9.5px] text-emerald-400 tracking-wider font-extrabold uppercase font-sans border-b border-slate-800 pb-1 block">SECURED ENVELOPE WATERMARK ORIGIN</span>
-                        <p className="whitespace-pre-wrap">{selectedDoc.content}</p>
+                        <p className="whitespace-pre-wrap">{selectedDoc.content ?? "No content available for this document yet."}</p>
                       </div>
 
                       <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-[10px] text-slate-600 font-semibold flex flex-col gap-1">
@@ -1260,7 +1399,7 @@ export default function CustomerPortal({
                         </div>
                         <div className="flex justify-between">
                           <span>Blockchain Serial Hash:</span>
-                          <span className="text-emerald-700 font-bold text-[9.5px] truncate max-w-[120px]">{selectedDoc.hash || "Not published"}</span>
+                          <span className="text-emerald-700 font-bold text-[9.5px] truncate max-w-[120px]">{selectedDoc.seal_code ?? "Not published"}</span>
                         </div>
                       </div>
 
@@ -1312,13 +1451,19 @@ export default function CustomerPortal({
                       onDragOver={handleDragOver}
                       onDragLeave={handleDragLeave}
                       onDrop={handleDrop}
-                      onClick={triggerManualFile}
-                      className={`py-12 border-2 border-dashed rounded-2xl text-center cursor-pointer transition flex flex-col items-center justify-center space-y-2 ${
-                        isDragging ? "bg-emerald-50 border-emerald-550" : "bg-slate-50 border-slate-205 hover:bg-slate-100/50"
+                      onClick={uploadSubmitting ? undefined : triggerManualFile}
+                      className={`py-12 border-2 border-dashed rounded-2xl text-center transition flex flex-col items-center justify-center space-y-2 ${
+                        uploadSubmitting
+                          ? "opacity-60 cursor-wait bg-slate-50 border-slate-205"
+                          : isDragging
+                          ? "bg-emerald-50 border-emerald-550 cursor-pointer"
+                          : "bg-slate-50 border-slate-205 hover:bg-slate-100/50 cursor-pointer"
                       }`}
                     >
                       <Upload className="w-8 h-8 text-slate-400" />
-                      <span className="block text-xs font-bold text-slate-900">Drag & Drop file original here</span>
+                      <span className="block text-xs font-bold text-slate-900">
+                        {uploadSubmitting ? "Uploading…" : "Drag & Drop file original here"}
+                      </span>
                       <span className="block text-[10px] text-slate-500 text-slate-400">or click to choose system files</span>
                       
                       <input 
@@ -1337,7 +1482,10 @@ export default function CustomerPortal({
                   <span className="text-[10px] font-mono text-slate-400 block uppercase font-bold tracking-wider">Attachment Registry Index</span>
                   
                   <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
-                    {uploadedFiles.map(file => (
+                    {uploadLoading && (
+                      <div className="py-8 text-center text-xs text-slate-400">Loading attachments…</div>
+                    )}
+                    {!uploadLoading && uploadedFiles.map(file => (
                       <div key={file.id} className="p-3 bg-slate-100/80 rounded-xl border border-slate-100 flex items-center justify-between text-xs">
                         <div className="flex items-center gap-2.5">
                           <FileText className="w-5 h-5 text-slate-500" />
@@ -1351,6 +1499,13 @@ export default function CustomerPortal({
                           <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-100 font-bold px-2 py-0.5 rounded uppercase font-sans">
                             Uploaded ✓
                           </span>
+                          <button
+                            onClick={() => downloadUploadedFile(file.id, file.name)}
+                            className="p-1 hover:bg-slate-200 text-slate-500 rounded transition"
+                            title="Download"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </button>
                           <button 
                             onClick={() => deleteUploadedFile(file.id)}
                             className="p-1 hover:bg-slate-200 text-slate-400 hover:text-red-650 rounded text-red-500 transition"
@@ -1360,7 +1515,7 @@ export default function CustomerPortal({
                         </div>
                       </div>
                     ))}
-                    {uploadedFiles.length === 0 && (
+                    {!uploadLoading && uploadedFiles.length === 0 && (
                       <div className="py-12 text-center text-xs text-slate-400 italic">
                         No attachment files submitted in current session. Use the left uploader to send items.
                       </div>

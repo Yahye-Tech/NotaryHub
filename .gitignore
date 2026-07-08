@@ -14,6 +14,9 @@ server.ts.bak
 test_db.ts
 /tmp/
 
+# Uploaded files (stored on disk at runtime)
+uploads/
+
 # Logs
 *.log
 

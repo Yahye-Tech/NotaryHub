@@ -1,63 +1,58 @@
 type Appointment = { id: string; customerName: string; serviceType: string; appointmentTime: string; status: string; branchId?: string; customerEmail?: string };
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { 
   Calendar, Clock, Search, BookOpen, UserCheck, 
-  Trash2, Plus, CheckCircle, MapPin 
+  Trash2, Plus, CheckCircle, MapPin, Loader2, AlertCircle
 } from "lucide-react";
-import {Branch} from "../../types";
+import { Branch } from "../../types";
+import { appointmentsApi, toUiAppointment } from "../../api/appointments.api";
+import { ApiException } from "../../api/client";
 
 interface CompanyAdminAppointmentsProps {
   branches: Branch[];
 }
 
 export default function CompanyAdminAppointments({ branches }: CompanyAdminAppointmentsProps) {
-  
-  // Real dynamic appointments state
-  const [appointments, setAppointments] = useState<Appointment[]>([
-    {
-      id: "ap-201",
-      branchId: "br-01",
-      customerName: "Ahmed Ali",
-      customerEmail: "ahmed@trading.so",
-      serviceType: "Power of Attorney (POA)",
-      appointmentTime: "2026-06-15 @ 10:00 AM",
-      status: "scheduled"
-    },
-    {
-      id: "ap-202",
-      branchId: "br-01",
-      customerName: "Fartun Farah",
-      customerEmail: "fartun@garowe-corp.so",
-      serviceType: "Agreement / Contract Notarization",
-      appointmentTime: "2026-06-15 @ 11:30 AM",
-      status: "scheduled"
-    },
-    {
-      id: "ap-203",
-      branchId: "br-02",
-      customerName: "Arthur Pendelton",
-      customerEmail: "arthur@pendelton.org",
-      serviceType: "Affidavit of Sworn Deposition",
-      appointmentTime: "2026-06-16 @ 02:00 PM",
-      status: "scheduled"
-    }
-  ]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [showBookForm, setShowBookForm] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   
-  // Form fields
   const [custName, setCustName] = useState("");
   const [custEmail, setCustEmail] = useState("");
-  const [servType, setServType] = useState("Power of Attorney");
+  const [servType, setServType] = useState("Power of Attorney (POA)");
   const [selectedBranchId, setSelectedBranchId] = useState(branches[0]?.id ?? "");
-  const [appDate, setAppDate] = useState("2026-06-15");
+  const [appDate, setAppDate] = useState(new Date().toISOString().slice(0, 10));
   const [appTime, setAppTime] = useState("10:00 AM");
 
-  const handleBookSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    if (branches.length > 0 && !selectedBranchId) {
+      setSelectedBranchId(branches[0].id);
+    }
+  }, [branches, selectedBranchId]);
+
+  const loadAppointments = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await appointmentsApi.list({ limit: 100 });
+      setAppointments(res.appointments.map(toUiAppointment));
+    } catch (err) {
+      setError(err instanceof ApiException ? err.message : "Failed to load appointments");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadAppointments(); }, [loadAppointments]);
+
+  const handleBookSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage("");
     setSuccessMessage("");
@@ -66,30 +61,43 @@ export default function CompanyAdminAppointments({ branches }: CompanyAdminAppoi
       setErrorMessage("Please enter customer name.");
       return;
     }
+    if (!selectedBranchId) {
+      setErrorMessage("Please select a branch.");
+      return;
+    }
 
-    const newAp: Appointment = {
-      id: `ap-${Date.now()}`,
-      branchId: selectedBranchId,
-      customerName: custName,
-      customerEmail: custEmail || `${custName.toLowerCase().replace(/\s+/g, ".")}@gmail.com`,
-      serviceType: servType,
-      appointmentTime: `${appDate} @ ${appTime}`,
-      status: "scheduled"
-    };
-
-    setAppointments(prev => [newAp, ...prev]);
-    setCustName("");
-    setCustEmail("");
-    setSuccessMessage(`Scheduled appointment for ${custName} on ${appDate} at ${appTime} successfully.`);
-    
-    // Auto-hide the success message banner after 4 seconds
-    setTimeout(() => {
-      setSuccessMessage("");
-    }, 4000);
+    setSubmitting(true);
+    try {
+      const res = await appointmentsApi.create({
+        branchId: selectedBranchId,
+        customerName: custName.trim(),
+        customerEmail: custEmail || undefined,
+        serviceType: servType,
+        appointmentDate: appDate,
+        appointmentTime: appTime,
+      });
+      setAppointments(prev => [toUiAppointment(res.appointment), ...prev]);
+      setCustName("");
+      setCustEmail("");
+      setSuccessMessage(`Scheduled appointment for ${res.appointment.customer_name} on ${appDate} at ${appTime}.`);
+      setTimeout(() => setSuccessMessage(""), 4000);
+    } catch (err) {
+      setErrorMessage(err instanceof ApiException ? err.message : "Failed to book appointment.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const handleStatusChange = (id: string, status: Appointment["status"]) => {
-    setAppointments(prev => prev.map(ap => ap.id === id ? { ...ap, status } : ap));
+  const handleStatusChange = async (id: string, action: "check_in" | "cancel") => {
+    try {
+      const status = action === "check_in" ? "checked_in" : "cancelled";
+      const res = await appointmentsApi.transition(id, status);
+      setAppointments(prev =>
+        prev.map(ap => ap.id === id ? toUiAppointment(res.appointment) : ap)
+      );
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to update appointment status.");
+    }
   };
 
   const filteredAps = appointments.filter(ap => 
@@ -97,10 +105,25 @@ export default function CompanyAdminAppointments({ branches }: CompanyAdminAppoi
     ap.serviceType.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16 text-slate-500 text-sm gap-2">
+        <Loader2 className="w-4 h-4 animate-spin" />
+        Loading appointments…
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6" id="company-admin-appointments-sub">
       
-      {/* Header controls */}
+      {error && (
+        <div className="flex items-center gap-2 p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          {error}
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row gap-3 justify-between items-stretch sm:items-center bg-slate-50 border border-slate-200 p-4 rounded-xl">
         <div className="relative flex-1">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
@@ -125,7 +148,6 @@ export default function CompanyAdminAppointments({ branches }: CompanyAdminAppoi
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         
-        {/* Appointments directory list */}
         <div className={showBookForm ? "lg:col-span-8" : "lg:col-span-12"}>
           <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden text-xs">
             <div className="overflow-x-auto">
@@ -141,7 +163,13 @@ export default function CompanyAdminAppointments({ branches }: CompanyAdminAppoi
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700">
-                  {filteredAps.map(ap => {
+                  {filteredAps.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="p-8 text-center text-slate-400">
+                        No appointments scheduled yet.
+                      </td>
+                    </tr>
+                  ) : filteredAps.map(ap => {
                     const branchObj = branches.find(b => b.id === ap.branchId);
                     return (
                       <tr key={ap.id} className="hover:bg-slate-50/50 transition">
@@ -152,7 +180,7 @@ export default function CompanyAdminAppointments({ branches }: CompanyAdminAppoi
                         <td className="p-4">
                           <span className="font-medium text-slate-800 flex items-center gap-1">
                             <MapPin className="w-3.5 h-3.5 text-blue-600" />
-                            {branchObj?.name || "Bosaso Main Branch"}
+                            {branchObj?.name || "—"}
                           </span>
                         </td>
                         <td className="p-4 text-slate-650 font-bold font-sans">
@@ -163,9 +191,9 @@ export default function CompanyAdminAppointments({ branches }: CompanyAdminAppoi
                         </td>
                         <td className="p-4">
                           <span className={`px-2 py-0.5 rounded-full text-[9px] font-sans font-bold leading-none uppercase ${
-                            ap.status === "scheduled" 
+                            ap.status === "scheduled" || ap.status === "checked_in"
                               ? "bg-blue-50 text-blue-700 border border-blue-200" 
-                              : ap.status === "notarised" 
+                              : ap.status === "completed" 
                               ? "bg-emerald-50 text-emerald-700 border border-emerald-250 font-medium" 
                               : "bg-slate-150 text-slate-500 font-medium"
                           }`}>
@@ -173,16 +201,16 @@ export default function CompanyAdminAppointments({ branches }: CompanyAdminAppoi
                           </span>
                         </td>
                         <td className="p-4 text-right flex gap-1.5 justify-end">
-                          {ap.status === "scheduled" && (
+                          {(ap.status === "scheduled" || ap.status === "confirmed") && (
                             <>
                               <button
-                                onClick={() => handleStatusChange(ap.id, "completed")}
+                                onClick={() => handleStatusChange(ap.id, "check_in")}
                                 className="bg-emerald-50 border border-emerald-200 text-emerald-700 px-2 py-1 rounded text-[10px] font-sans font-bold hover:bg-emerald-100 transition"
                               >
                                 Check In
                               </button>
                               <button
-                                onClick={() => handleStatusChange(ap.id, "canceled")}
+                                onClick={() => handleStatusChange(ap.id, "cancel")}
                                 className="bg-slate-100 border border-slate-200 text-slate-600 px-2 py-1 rounded text-[10px] font-semibold hover:bg-slate-205 transition"
                               >
                                 Cancel
@@ -199,7 +227,6 @@ export default function CompanyAdminAppointments({ branches }: CompanyAdminAppoi
           </div>
         </div>
 
-        {/* Dynamic booking form drawer side-by-side */}
         {showBookForm && (
           <div className="lg:col-span-4 bg-white border border-slate-200 p-5 rounded-xl shadow-sm space-y-4" id="book-new-appointment-form">
             <h3 className="text-xs font-mono font-bold text-slate-450 uppercase tracking-wider">Book Client Appointment</h3>
@@ -292,9 +319,10 @@ export default function CompanyAdminAppointments({ branches }: CompanyAdminAppoi
 
               <button
                 type="submit"
-                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs py-2.5 rounded-lg transition outline-none cursor-pointer"
+                disabled={submitting}
+                className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white font-bold text-xs py-2.5 rounded-lg transition outline-none cursor-pointer"
               >
-                Book Visitor Slot
+                {submitting ? "Booking…" : "Book Visitor Slot"}
               </button>
             </form>
           </div>

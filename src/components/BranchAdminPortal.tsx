@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 type Appointment = { id: string; branchId?: string; customer_name: string; service_type: string; appointmentTime: string; status: string; customerEmail?: string };
 
 import { 
@@ -7,9 +7,15 @@ import {
   Lock, Key, Ban, UserCheck, AlertTriangle, Play, HelpCircle, Send, TrendingUp, 
   FileSpreadsheet, ClipboardList, RefreshCw, Star, Coins, Download, Settings, ChevronRight, X, Phone, Mail, Sliders, Menu, Sun, Moon
 } from "lucide-react";
-import { Branch, Employee, QueueTicket, NotaryDocument } from "../types";
+import { Branch, Employee, QueueTicket, NotaryDocument, Customer } from "../types";
+import { documentsApi, customersApi } from "../api/documents.api";
+import { appointmentsApi, formatAppointmentDisplayTime } from "../api/appointments.api";
+import { queueApi } from "../api/queue.api";
+import { getAccessToken, ApiException } from "../api/client";
 
 interface BranchAdminPortalProps {
+  branchId?: string;
+  branchName?: string;
   branches: Branch[];
   employees: Employee[];
   appointments: never[];
@@ -40,7 +46,22 @@ interface AdminCustomer {
   historyLogs: string[];
 }
 
+function customerToAdmin(c: Customer): AdminCustomer {
+  return {
+    id: c.id,
+    name: c.full_name,
+    phone: c.phone ?? "",
+    nationalId: c.id_number ?? "",
+    docNumber: "",
+    status: c.status,
+    visitsCount: 1,
+    historyLogs: [],
+  };
+}
+
 export default function BranchAdminPortal({
+  branchId,
+  branchName,
   branches,
   employees,
   appointments,
@@ -49,13 +70,19 @@ export default function BranchAdminPortal({
   onLogout
 }: BranchAdminPortalProps) {
   
-  // Active office target: Bosaso Main Branch is the fixed focus under SaaS structure
-  const activeBranch = branches.find(b => b.name.includes("Bosaso Main Branch")) || branches[0] || {
-    name: "Bosaso Main Branch",
-    address: "Kismayo Street, Central Bosaso",
-    phone: "+252 90 779 1234",
-    countersCount: 4
-  };
+  // Active branch from API context
+  const activeBranch = branches[0] || (branchName ? {
+    id: branchId ?? "",
+    name: branchName,
+    address: "",
+    phone: "",
+    countersCount: 2,
+  } : {
+    name: "Branch Office",
+    address: "",
+    phone: "",
+    countersCount: 2,
+  });
 
   // Primary Sidebar state
   const [activeTab, setActiveTab] = useState<
@@ -70,6 +97,37 @@ export default function BranchAdminPortal({
   }, [isDarkMode]);
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [deskLoading, setDeskLoading] = useState(true);
+
+  const loadDeskData = useCallback(async () => {
+    setDeskLoading(true);
+    try {
+      const [docsRes, custsRes, appsRes, queueRes] = await Promise.all([
+        documentsApi.list({ limit: 100, branchId }),
+        customersApi.list(),
+        appointmentsApi.list({ limit: 100, branchId }),
+        queueApi.list(branchId),
+      ]);
+      setLocalDocs(docsRes.documents);
+      setCustomers(custsRes.customers.map(customerToAdmin));
+      setLocalApps(appsRes.appointments.map(a => ({
+        id: a.id,
+        branchId: a.branch_id,
+        customer_name: a.customer_name,
+        customerEmail: a.customer_email ?? undefined,
+        service_type: a.service_type,
+        appointmentTime: formatAppointmentDisplayTime(a.start_time),
+        status: a.status === "cancelled" ? "canceled" : a.status,
+      })));
+      setLocalQueue(queueRes.tickets);
+    } catch (err) {
+      console.error("[BranchAdminPortal] Failed to load desk data:", err);
+    } finally {
+      setDeskLoading(false);
+    }
+  }, [branchId]);
+
+  useEffect(() => { loadDeskData(); }, [loadDeskData]);
 
   // Local state tables to make mutations functional for the Branch Admin (e.g. Crud Employees, manage queues, verify fingerprints)
   const [localEmployees, setLocalEmployees] = useState<ExtendedEmployee[]>([]);
@@ -145,45 +203,80 @@ export default function BranchAdminPortal({
   };
 
   // Queue core actions
-  const handleCallNext = () => {
-    const nextWaiting = localQueue.find(q => q.status === "waiting");
-    if (!nextWaiting) {
-      alert("No pending check-in tickets available in the lobby.");
-      return;
+  const handleCallNext = async () => {
+    try {
+      const res = await queueApi.callNext(branchId, 1);
+      setLocalQueue(prev => {
+        const idx = prev.findIndex(q => q.id === res.ticket.id);
+        if (idx >= 0) {
+          const updated = [...prev];
+          updated[idx] = res.ticket;
+          return updated;
+        }
+        return [...prev, res.ticket];
+      });
+      pageChime(`🛎️ Audio Chime: Calling Ticket ${res.ticket.ticket_number} (${res.ticket.customer_name}) to Counter 1.`);
+      setNotifications(prev => [
+        { id: Date.now().toString(), type: "info", title: "Ticket Status Shifted", details: `Called ${res.ticket.customer_name} (${res.ticket.ticket_number}) to Counter 1.`, date: "Just now" },
+        ...prev
+      ]);
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "No pending check-in tickets available in the lobby.");
     }
-    // Call the ticket to first available counter
-    const updated = localQueue.map(q => {
-      if (q.id === nextWaiting.id) {
-        return { ...q, status: "calling" as const, called_counter: 1 };
-      }
-      // Toggle previous calling tickets to completed
-      if (q.status === "calling") {
-        return { ...q, status: "completed" as const, served_by: "Ahmed Farah" };
-      }
-      return q;
-    });
-    setLocalQueue(updated);
-    pageChime(`🛎️ Audio Chime: Calling Ticket ${nextWaiting.ticket_number} (${nextWaiting.customer_name}) to Counter 1.`);
-    
-    setNotifications(prev => [
-      { id: Date.now().toString(), type: "info", title: "Ticket Status Shifted", details: `Called ${nextWaiting.customer_name} (${nextWaiting.ticket_number}) to Counter 1.`, date: "Just now" },
-      ...prev
-    ]);
   };
 
-  const handleSkipTicket = (id: string) => {
-    setLocalQueue(prev => prev.map(q => q.id === id ? { ...q, status: "passed" as const } : q));
-    alert("Ticket marked as passed/skipped.");
+  const handleSkipTicket = async (id: string) => {
+    try {
+      const res = await queueApi.skip(id);
+      setLocalQueue(prev => prev.map(q => q.id === id ? res.ticket : q));
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to skip ticket.");
+    }
   };
 
-  const handleTransferTicket = (id: string, newCounter: number) => {
-    setLocalQueue(prev => prev.map(q => q.id === id ? { ...q, status: "calling" as const, called_counter: newCounter } : q));
-    pageChime(`⚙️ Ticket transferred successfully. Paged to Station Counter ${newCounter}.`);
+  const handleTransferTicket = async (id: string, newCounter: number) => {
+    try {
+      const res = await queueApi.callNext(branchId, newCounter);
+      setLocalQueue(prev => prev.map(q => q.id === res.ticket.id ? res.ticket : q));
+      pageChime(`⚙️ Ticket transferred successfully. Paged to Station Counter ${newCounter}.`);
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to transfer ticket.");
+    }
   };
 
-  const handleReopenTicket = (id: string) => {
-    setLocalQueue(prev => prev.map(q => q.id === id ? { ...q, status: "waiting" as const } : q));
-    alert("Ticket restored back to waiting list.");
+  const handleReopenTicket = async (id: string) => {
+    try {
+      const res = await queueApi.recall(id);
+      setLocalQueue(prev => prev.map(q => q.id === id ? res.ticket : q));
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to restore ticket.");
+    }
+  };
+
+  const handleManualCheckIn = async () => {
+    const guest = prompt("Enter customer name for manual walk-in queue check-in:");
+    if (!guest) return;
+    const svc = prompt("Enter service (Power of Attorney, Affidavit, Contract):") || "General Notary";
+    try {
+      const res = await queueApi.checkIn({
+        branchId,
+        customerName: guest,
+        serviceType: svc,
+      });
+      setLocalQueue(prev => [...prev, res.ticket]);
+      alert(`✓ Walk-in Ticket ${res.ticket.ticket_number} registered.`);
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to register walk-in ticket.");
+    }
+  };
+
+  const handleCompleteTicket = async (id: string) => {
+    try {
+      const res = await queueApi.complete(id);
+      setLocalQueue(prev => prev.map(q => q.id === id ? res.ticket : q));
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to complete ticket.");
+    }
   };
 
   // Employee creation
@@ -239,12 +332,17 @@ export default function BranchAdminPortal({
   };
 
   // Appointment alterations
-  const handleCancelApp = (id: string) => {
-    setLocalApps(prev => prev.map(app => app.id === id ? { ...app, status: "canceled" as const } : app));
-    setNotifications(prev => [
-      { id: Date.now().toString(), type: "alert", title: "Appointment Canceled", details: "Client itinerary item was flagged canceled in Bosaso CRM.", date: "Just now" },
-      ...prev
-    ]);
+  const handleCancelApp = async (id: string) => {
+    try {
+      await appointmentsApi.transition(id, "cancelled");
+      setLocalApps(prev => prev.map(app => app.id === id ? { ...app, status: "canceled" as const } : app));
+      setNotifications(prev => [
+        { id: Date.now().toString(), type: "alert", title: "Appointment Canceled", details: "Booking cancelled in the system.", date: "Just now" },
+        ...prev
+      ]);
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to cancel appointment.");
+    }
   };
 
   const triggerReassignApp = (target: Appointment) => {
@@ -260,34 +358,53 @@ export default function BranchAdminPortal({
   };
 
   // Document actions
-  const handleUpdateDocStatus = (id: string, status: NotaryDocument["status"]) => {
-    setLocalDocs(prev => prev.map(doc => doc.id === id ? { ...doc, status } : doc));
-    setNotifications(prev => [
-      { id: Date.now().toString(), type: "success", title: "Document Ledger Updated", details: `File ${id} status configured to ${status.toUpperCase()}.`, date: "Just now" },
-      ...prev
-    ]);
+  const handleUpdateDocStatus = async (id: string, status: NotaryDocument["status"]) => {
+    try {
+      const res = await documentsApi.transition(id, status);
+      setLocalDocs(prev => prev.map(doc => doc.id === id ? res.document : doc));
+      setNotifications(prev => [
+        { id: Date.now().toString(), type: "success", title: "Document Ledger Updated", details: `File ${res.document.document_number} status set to ${status}.`, date: "Just now" },
+        ...prev
+      ]);
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to update document status.");
+    }
   };
 
-  const executeDocumentApprove = (id: string) => {
-    setLocalDocs(prev => prev.map(doc => {
-      if (doc.id === id) {
-        return { 
-          ...doc, 
-          status: "completed", 
-          watermarkCode: "BOSASO-APPROVED-" + Math.floor(Math.random() * 900 + 100),
-          fingerprintHash: "Secured ✓ sha256_e" + Math.floor(Math.random() * 90000)
-        };
-      }
-      return doc;
-    }));
-    setSelectedDocToReview(null);
-    alert("✓ Document sealed, verified with signatures, and marked COMPLETED.");
+  const executeDocumentApprove = async (id: string) => {
+    const doc = localDocs.find(d => d.id === id);
+    if (!doc) return;
+    const nextStatus: Record<string, NotaryDocument["status"]> = {
+      draft: "pending_review",
+      pending_review: "approved",
+      approved: "signed",
+      signed: "notarised",
+      rejected: "draft",
+    };
+    const target = nextStatus[doc.status];
+    if (!target) {
+      alert(`Cannot advance document from status '${doc.status}'.`);
+      return;
+    }
+    try {
+      const res = await documentsApi.transition(id, target);
+      setLocalDocs(prev => prev.map(d => d.id === id ? res.document : d));
+      setSelectedDocToReview(null);
+      alert(`Document ${res.document.document_number} moved to ${target}.`);
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to approve document.");
+    }
   };
 
-  const executeDocumentReject = (id: string) => {
-    setLocalDocs(prev => prev.map(doc => doc.id === id ? { ...doc, status: "draft" } : doc));
-    setSelectedDocToReview(null);
-    alert("❌ Draft rejected. Sent back to customer for corrections.");
+  const executeDocumentReject = async (id: string) => {
+    try {
+      const res = await documentsApi.transition(id, "rejected", "Rejected by branch supervisor");
+      setLocalDocs(prev => prev.map(d => d.id === id ? res.document : d));
+      setSelectedDocToReview(null);
+      alert("Document rejected and returned for corrections.");
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to reject document.");
+    }
   };
 
   // Fingerprint and signature mock triggers
@@ -308,7 +425,7 @@ export default function BranchAdminPortal({
     }
   };
 
-  // AI assistant simulation with direct answering mechanics matching user demands
+  // AI assistant — uses Gemini API with local branch context fallbacks
   const handleAISubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!aiPrompt.trim()) return;
@@ -318,12 +435,32 @@ export default function BranchAdminPortal({
 
     let reply = "I have analyzed the current branch database. If you have any other questions, let me know.";
     const lower = prompt.toLowerCase();
+
+    try {
+      const token = getAccessToken();
+      const response = await fetch("/api/gemini/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify({ messages: [{ role: "user", content: prompt }] }),
+      });
+      const data = await response.json();
+      if (data.success && data.reply) {
+        setAiHistory(prev => [...prev, { sender: "ai", msg: data.reply }]);
+        return;
+      }
+    } catch {
+      // fall through to local context replies
+    }
     
     if (lower.includes("employee") && (lower.includes("most") || lower.includes("highest") || lower.includes("processed"))) {
       reply = "📊 **Top Employee Performance Audit**:\nOfficer **Ahmed Farah** has finalized **45 documents** and served **30 customers** this week, maintaining an average processing duration of **12 minutes per file**.";
     } else if (lower.includes("pending") && lower.includes("document")) {
-      const pendingCount = localDocs.filter(d => d.status !== "completed").length;
-      reply = `📂 **Pending Documents Audit**:\nThere are currently **${pendingCount} pending documents** awaiting notary sealing inside the Bosaso ledger. These include the Dual Residence Affidavit which contains pending digital signatures.`;
+      const pendingCount = localDocs.filter(d => !["notarised", "revoked"].includes(d.status)).length;
+      reply = `📂 **Pending Documents Audit**:\nThere are currently **${pendingCount} pending documents** awaiting notarisation in this branch.`;
     } else if (lower.includes("busiest") || lower.includes("day")) {
       reply = "📅 **Incoming Velocity Analytics**:\nBased on active booking metadata, the busiest day this month was **Wednesday, 2026-06-10** with 34 active check-ins and 18 queued walking clients.";
     } else if (lower.includes("report") || lower.includes("generate")) {
@@ -533,7 +670,7 @@ export default function BranchAdminPortal({
                 <FileText className="w-3.5 h-3.5" /> Document Sealing
               </span>
               <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 rounded-full font-bold">
-                {localDocs.filter(d => d.status !== "completed").length}
+                {localDocs.filter(d => !["notarised", "revoked"].includes(d.status)).length}
               </span>
             </button>
 
@@ -660,8 +797,8 @@ export default function BranchAdminPortal({
                     <span className="text-[10px] text-slate-500 font-mono font-bold uppercase tracking-wider block">Appointments Today</span>
                     <Calendar className="w-4 h-4 text-indigo-600" />
                   </div>
-                  <span className="block text-2xl font-extrabold text-slate-900 mt-2">{appointments.length > 0 ? 18 : 0}</span>
-                  <span className="text-[9.5px] font-mono text-slate-500 block mt-1">{appointments.length > 0 ? "4 pending fasttrack" : "0 fasttrack pending"}</span>
+                  <span className="block text-2xl font-extrabold text-slate-900 mt-2">{localApps.length}</span>
+                  <span className="text-[9.5px] font-mono text-slate-500 block mt-1">{localApps.filter(a => a.status === "scheduled").length} scheduled today</span>
                 </div>
 
                 <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-xs">
@@ -669,8 +806,8 @@ export default function BranchAdminPortal({
                     <span className="text-[10px] text-slate-500 font-mono font-bold uppercase tracking-wider block">Queue Waiting</span>
                     <Clock className="w-4 h-4 text-emerald-600" />
                   </div>
-                  <span className="block text-2xl font-extrabold text-slate-900 mt-2">{queue.length > 0 ? 7 : 0}</span>
-                  <span className="text-[9.5px] font-mono text-yellow-600 block mt-1">{queue.length > 0 ? "Average wait: 6.8 min" : "Queue empty"}</span>
+                  <span className="block text-2xl font-extrabold text-slate-900 mt-2">{localQueue.filter(q => q.status === "waiting" || q.status === "calling").length}</span>
+                  <span className="text-[9.5px] font-mono text-yellow-600 block mt-1">{localQueue.filter(q => q.status === "waiting").length > 0 ? `${localQueue.filter(q => q.status === "waiting").length} waiting in lobby` : "Queue empty"}</span>
                 </div>
 
                 <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-xs">
@@ -912,16 +1049,7 @@ export default function BranchAdminPortal({
                       Call Next Client
                     </button>
                     <button 
-                      onClick={() => {
-                        const guest = prompt("Enter customer name for manual walk-in queue check-in:");
-                        if (guest) {
-                          const svc = prompt("Enter service (Power of Attorney, Affidavit, Contract):") || "General Notary";
-                          // Walk-in check-in now goes through real queue API
-                          // queueApi.checkIn({ customerName: guest, serviceType: svc })
-                          // For now, alert the employee to use the Queue tab
-                          alert(`Please use the Queue tab to check in ${guest}. The real queue system is now active.`);
-                        }
-                      }}
+                      onClick={handleManualCheckIn}
                       className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs py-1.5 px-3 rounded-lg transition"
                     >
                       + Manual Check-in
@@ -938,9 +1066,9 @@ export default function BranchAdminPortal({
                           <h4 className="font-bold text-slate-900 text-sm">{tkt.customer_name}</h4>
                         </div>
                         <p className="text-[10px] text-slate-500 mt-1 font-mono">
-                          Checked-in: <b>{tkt.checkInTime}</b> • Requested: <b className="text-slate-700">{tkt.service_type}</b>
-                          {tkt.calledCounter && ` • Assigned Station: Counter ${tkt.calledCounter}`}
-                          {tkt.servedBy && ` • Handled Code: ${tkt.servedBy}`}
+                          Checked-in: <b>{tkt.check_in_time}</b> • Requested: <b className="text-slate-700">{tkt.service_type}</b>
+                          {tkt.called_counter && ` • Assigned Station: Counter ${tkt.called_counter}`}
+                          {tkt.served_by && ` • Handled By: ${tkt.served_by}`}
                         </p>
                       </div>
 
@@ -978,10 +1106,7 @@ export default function BranchAdminPortal({
 
                         {tkt.status === "calling" && (
                           <button 
-                            onClick={() => {
-                              setLocalQueue(prev => prev.map(q => q.id === tkt.id ? { ...q, status: "completed" as const, served_by: "Elena Rostova" } : q));
-                              alert("Ticket updated to completed.");
-                            }}
+                            onClick={() => handleCompleteTicket(tkt.id)}
                             className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold p-1 px-2.5 rounded-md font-sans text-[11px]"
                           >
                             Mark Completed
