@@ -25,6 +25,8 @@ export interface ActiveUser {
   username: string;
   email: string;
   tenantId: string | null;
+  branchId?: string | null;
+  branchName?: string | null;
 }
 
 // ─── Login form ───────────────────────────────────────────────────────────────
@@ -66,6 +68,8 @@ function LoginForm({ onLogin }: LoginFormProps) {
           username: res.user.fullName,
           email:    res.user.email,
           tenantId: res.user.tenantId,
+          branchId: res.user.branchId ?? null,
+          branchName: res.user.branchName ?? null,
         });
       }, 500);
     } catch (err) {
@@ -359,43 +363,19 @@ export default function SaaSDashboard() {
     CUSTOMER:      { CREATE_DOCUMENT: false, EDIT_DOCUMENT: false, DELETE_DOCUMENT: false, VIEW_REPORTS: false, CREATE_EMPLOYEE: false, CREATE_BRANCH: false, MANAGE_SUBSCRIPTIONS: false, BYPASS_BIOMETRICS: false },
   });
 
-  // ── On mount: check if a valid session already exists ─────────────────────
-  useEffect(() => {
-    (async () => {
-      try {
-        // Try to refresh the access token from httpOnly cookie
-        const refreshRes = await authApi.refresh();
-        setAccessToken(refreshRes.accessToken);
-
-        // Fetch current user
-        const me = await authApi.me();
-        setCurrentUser({
-          id:       me.id,
-          role:     me.role as ActiveUser["role"],
-          username: me.fullName,
-          email:    me.email,
-          tenantId: me.tenantId,
-        });
-      } catch {
-        // No valid session — show login
-      } finally {
-        setBootstrapping(false);
-      }
-    })();
-  }, []);
-
   // ── Load data when user logs in ───────────────────────────────────────────
   const loadDataForUser = useCallback(async (user: ActiveUser) => {
     try {
       if (user.role === "SUPER_ADMIN") {
         const res = await tenantsApi.list();
         setTenants(res.tenants);
-        // Load all branches for all tenants
-        const allBranches = await Promise.all(
-          res.tenants.map(t => branchesApi.list(t.id).then(r => r.branches))
-        );
+        const [allBranches, allEmployees] = await Promise.all([
+          Promise.all(res.tenants.map(t => branchesApi.list(t.id).then(r => r.branches))),
+          Promise.all(res.tenants.map(t => employeesApi.listByTenant(t.id).then(r => r.employees))),
+        ]);
         setBranches(allBranches.flat());
-      } else if (user.tenantId) {
+        setEmployees(allEmployees.flat());
+      } else if (user.tenantId && (user.role === "COMPANY_ADMIN" || user.role === "BRANCH_ADMIN")) {
         const [tenantRes, branchRes, empRes] = await Promise.all([
           tenantsApi.get(user.tenantId),
           branchesApi.list(user.tenantId),
@@ -409,6 +389,33 @@ export default function SaaSDashboard() {
       console.error("[Dashboard] Failed to load data:", err);
     }
   }, []);
+
+  // ── On mount: check if a valid session already exists ─────────────────────
+  useEffect(() => {
+    (async () => {
+      try {
+        const refreshRes = await authApi.refresh();
+        setAccessToken(refreshRes.accessToken);
+
+        const me = await authApi.me();
+        const user: ActiveUser = {
+          id:       me.id,
+          role:     me.role as ActiveUser["role"],
+          username: me.fullName,
+          email:    me.email,
+          tenantId: me.tenantId,
+          branchId: me.branchId ?? null,
+          branchName: me.branchName ?? null,
+        };
+        setCurrentUser(user);
+        await loadDataForUser(user);
+      } catch {
+        // No valid session — show login
+      } finally {
+        setBootstrapping(false);
+      }
+    })();
+  }, [loadDataForUser]);
 
   const handleLogin = useCallback(async (user: ActiveUser) => {
     setCurrentUser(user);
@@ -758,11 +765,15 @@ export default function SaaSDashboard() {
         );
 
       case "BRANCH_ADMIN": {
-        const myBranch = branches.find(b =>
-          employees.some(e => e.user_id === currentUser.id && e.branch_id === b.id)
-        );
+        const myBranch = currentUser.branchId
+          ? branches.find(b => b.id === currentUser.branchId)
+          : branches.find(b =>
+              employees.some(e => e.user_id === currentUser.id && e.branch_id === b.id)
+            );
         return (
           <BranchAdminPortal
+            branchId={currentUser.branchId ?? myBranch?.id}
+            branchName={currentUser.branchName ?? myBranch?.name}
             branches={myBranch ? [myBranch] : []}
             employees={employees.filter(e => e.branch_id === myBranch?.id)}
             appointments={[]}
@@ -776,6 +787,9 @@ export default function SaaSDashboard() {
       case "EMPLOYEE":
         return (
           <EmployeePortal
+            branchId={currentUser.branchId ?? undefined}
+            branchName={currentUser.branchName ?? undefined}
+            employeeName={currentUser.username}
             queue={[]}
             onAnnounceTicket={() => {}}
             onAdvanceTicketStatus={() => {}}

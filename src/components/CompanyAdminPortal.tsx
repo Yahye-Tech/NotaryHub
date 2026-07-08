@@ -16,6 +16,8 @@ import CompanyAdminCustomers from "./company/CompanyAdminCustomers";
 import CompanyAdminDocuments from "./company/CompanyAdminDocuments";
 import CompanyAdminAppointments from "./company/CompanyAdminAppointments";
 import CompanyAdminBilling from "./company/CompanyAdminBilling";
+import { settingsApi, auditApi, type AuditLogEntry } from "../api/settings.api";
+import { ApiException } from "../api/client";
 
 interface CompanyAdminPortalProps {
   tenants: Tenant[];
@@ -108,6 +110,9 @@ export default function CompanyAdminPortal({
   // Brand customize states
   const [primaryColor, setPrimaryColor] = useState("#2563EB");
   const [companyName, setCompanyName] = useState("Bosaso Notary Company Ltd.");
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [complianceAuditLogs, setComplianceAuditLogs] = useState<AuditLogEntry[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
   const [automaticSms, setAutomaticSms] = useState(true);
   const [identityChecks, setIdentityChecks] = useState(true);
 
@@ -291,6 +296,54 @@ export default function CompanyAdminPortal({
   const handleCSVExportMock = () => {
     alert("Compiling transaction ledgers, biometric logs and client registries...\n\nCompiling database export payload: 'Notary_Company_Export_2026.csv'...\n\nSuccessfully downloaded file.");
   };
+
+  useEffect(() => {
+    if (!selectedTenantId) return;
+    settingsApi.get().then(res => {
+      if (res.profile.primary_color) setPrimaryColor(res.profile.primary_color);
+      if (res.profile.contact_name) setCompanyName(res.profile.contact_name);
+    }).catch(() => {});
+  }, [selectedTenantId]);
+
+  useEffect(() => {
+    if (activeTab !== "reports") return;
+    setAuditLoading(true);
+    auditApi.list({ limit: 50 })
+      .then(res => setComplianceAuditLogs(res.logs))
+      .catch(() => setComplianceAuditLogs([]))
+      .finally(() => setAuditLoading(false));
+  }, [activeTab, selectedTenantId]);
+
+  const handleSaveSettings = async () => {
+    setSettingsSaving(true);
+    try {
+      await settingsApi.update({ primaryColor, contactName: companyName });
+      alert("Company settings saved successfully.");
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to save settings.");
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const displayAuditLogs = complianceAuditLogs.length > 0
+    ? complianceAuditLogs.map(log => ({
+        id: log.id,
+        user_id: log.user_id,
+        tenant_id: log.tenant_id,
+        branch_id: log.branch_id,
+        action: log.action,
+        resource_type: log.resource_type ?? "auth",
+        resource_id: log.resource_id,
+        resource_label: log.resource_label,
+        old_values: null,
+        new_values: null,
+        meta: log.actor_name ? { username: log.actor_name } : null,
+        ip_address: log.ip_address,
+        user_agent: null,
+        created_at: log.created_at,
+      }))
+    : auditLogs;
 
   return (
     <div className={`flex flex-col md:flex-row bg-[#F8FAFC] rounded-xl overflow-hidden text-slate-800 font-sans border border-slate-200 shadow-sm min-h-[690px] relative dark-portal-wrapper ${isDarkMode ? "dark" : ""}`} id="company-admin-portal-root">
@@ -1297,7 +1350,9 @@ export default function CompanyAdminPortal({
 
           {activeTab === "customers" && <CompanyAdminCustomers />}
 
-          {activeTab === "documents" && <CompanyAdminDocuments />}
+          {activeTab === "documents" && (
+            <CompanyAdminDocuments branches={activeTenantBranches} userRole={userRole} />
+          )}
 
           {activeTab === "appointments" && <CompanyAdminAppointments branches={activeTenantBranches} />}
 
@@ -1360,8 +1415,10 @@ export default function CompanyAdminPortal({
                     <span className="text-[9px] bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full text-indigo-700 font-bold font-mono">SECURE COGNITIVE LEDGERS</span>
                   </div>
                   <div className="divide-y divide-slate-100 text-xs font-mono leading-relaxed max-h-[300px] overflow-y-auto bg-white pr-0.5">
-                    {auditLogs && auditLogs.length > 0 ? (
-                      auditLogs.map((log, idx) => (
+                    {auditLoading ? (
+                      <div className="p-6 text-center text-slate-400 text-xs">Loading audit trail…</div>
+                    ) : displayAuditLogs && displayAuditLogs.length > 0 ? (
+                      displayAuditLogs.map((log, idx) => (
                         <div key={log.id || idx} className="p-3 bg-white hover:bg-slate-50 flex flex-col sm:flex-row justify-between gap-2.5 border-b border-slate-100">
                           <div className="space-y-1">
                             <span className="text-slate-400 text-[10px] flex items-center gap-1 font-sans">
@@ -1580,10 +1637,11 @@ export default function CompanyAdminPortal({
                 </button>
                 <button
                   type="button"
-                  onClick={() => alert("Environments credentials stored successfully on the secure tenant config key-store.")}
-                  className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-5 py-2.5 rounded-lg transition shadow-sm cursor-pointer"
+                  onClick={handleSaveSettings}
+                  disabled={settingsSaving}
+                  className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-bold text-xs px-5 py-2.5 rounded-lg transition shadow-sm cursor-pointer"
                 >
-                  Save Settings Parameters
+                  {settingsSaving ? "Saving…" : "Save Settings Parameters"}
                 </button>
               </div>
 

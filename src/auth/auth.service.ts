@@ -344,3 +344,32 @@ export async function writeAuditLog(entry: {
     ]
   );
 }
+
+// ─── Employee context (branch assignment for portal users) ─────────────────
+
+export interface EmployeeContext {
+  employeeId: string;
+  branchId: string;
+  branchName: string;
+}
+
+export async function getEmployeeContext(userId: string): Promise<EmployeeContext | null> {
+  const { rows } = await query<{
+    employee_id: string;
+    branch_id: string;
+    branch_name: string;
+  }>(
+    `SELECT e.id AS employee_id, e.branch_id, b.name AS branch_name
+     FROM employees e
+     JOIN branches b ON b.id = e.branch_id AND b.is_deleted = FALSE
+     WHERE e.user_id = $1 AND e.is_deleted = FALSE`,
+    [userId]
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    employeeId: row.employee_id,
+    branchId: row.branch_id,
+    branchName: row.branch_name,
+  };
+}

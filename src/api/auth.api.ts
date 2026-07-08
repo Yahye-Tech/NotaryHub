@@ -9,6 +9,9 @@ export interface LoginResponse {
     role: string;
     tenantId: string | null;
     totpEnabled: boolean;
+    employeeId?: string | null;
+    branchId?: string | null;
+    branchName?: string | null;
   };
   requires2fa?: boolean;
 }
@@ -23,6 +26,9 @@ export interface MeResponse {
   status: string;
   emailVerified: boolean;
   totpEnabled: boolean;
+  employeeId?: string | null;
+  branchId?: string | null;
+  branchName?: string | null;
 }
 
 export const authApi = {

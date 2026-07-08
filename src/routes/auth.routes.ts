@@ -22,6 +22,7 @@ import {
   disableTotp,
   verifyTotpCode,
   writeAuditLog,
+  getEmployeeContext,
 } from "../auth/auth.service.js";
 
 import {
@@ -75,6 +76,28 @@ function getIp(req: Request): string {
 
 function getUserAgent(req: Request): string {
   return req.headers["user-agent"] || "unknown";
+}
+
+async function buildUserProfile(user: Awaited<ReturnType<typeof findUserById>>) {
+  if (!user) return null;
+  const employeeCtx =
+    user.role === "EMPLOYEE" || user.role === "BRANCH_ADMIN"
+      ? await getEmployeeContext(user.id)
+      : null;
+  return {
+    id: user.id,
+    email: user.email,
+    fullName: user.full_name,
+    phone: user.phone,
+    role: user.role,
+    tenantId: user.tenant_id,
+    status: user.status,
+    emailVerified: user.email_verified,
+    totpEnabled: user.totp_enabled,
+    employeeId: employeeCtx?.employeeId ?? null,
+    branchId: employeeCtx?.branchId ?? null,
+    branchName: employeeCtx?.branchName ?? null,
+  };
 }
 
 const REFRESH_COOKIE = "notaryhub_refresh";
@@ -264,6 +287,11 @@ router.post("/login", loginLimiter, loginValidator, async (req: Request, res: Re
 
   await clearFailedLogins(user.id);
 
+  const employeeCtx =
+    user.role === "EMPLOYEE" || user.role === "BRANCH_ADMIN"
+      ? await getEmployeeContext(user.id)
+      : null;
+
   // Update last_login_ip
   const { query: dbQuery } = await import("../db/pool.js");
   await dbQuery(
@@ -300,6 +328,9 @@ router.post("/login", loginLimiter, loginValidator, async (req: Request, res: Re
       role: user.role,
       tenantId: user.tenant_id,
       totpEnabled: user.totp_enabled,
+      employeeId: employeeCtx?.employeeId ?? null,
+      branchId: employeeCtx?.branchId ?? null,
+      branchName: employeeCtx?.branchName ?? null,
     },
   });
 });
@@ -548,17 +579,7 @@ router.get("/me", requireAuth, async (req: Request, res: Response) => {
     return;
   }
 
-  res.json({
-    id: user.id,
-    email: user.email,
-    fullName: user.full_name,
-    phone: user.phone,
-    role: user.role,
-    tenantId: user.tenant_id,
-    status: user.status,
-    emailVerified: user.email_verified,
-    totpEnabled: user.totp_enabled,
-  });
+  res.json(await buildUserProfile(user));
 });
 
 // ─────────────────────────────────────────────────────────────────────────
