@@ -23,6 +23,7 @@ import customerRoutes from "./src/routes/customer.routes.js";
 import settingsRoutes from "./src/routes/settings.routes.js";
 import auditRoutes from "./src/routes/audit.routes.js";
 import appointmentRoutes from "./src/routes/appointment.routes.js";
+import queueRoutes from "./src/routes/queue.routes.js";
 
 // ─── RBAC middleware (for protecting existing routes) ─────────────────────
 import { requireAuth, requireMinRole } from "./src/middleware/auth.middleware.js";
@@ -74,6 +75,7 @@ app.use("/api/customers", customerRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/audit-logs", auditRoutes);
 app.use("/api/appointments", appointmentRoutes);
+app.use("/api/queue", queueRoutes);
 
 // ─── Gemini AI client ─────────────────────────────────────────────────────
 const ai = new GoogleGenAI({

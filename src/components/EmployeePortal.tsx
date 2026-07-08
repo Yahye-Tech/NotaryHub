@@ -1,3 +1,4 @@
+import QueuePanel from "./QueuePanel";
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { 
   Users, UserPlus, Volume2, CheckCircle, Scan, UserCheck, Search, Plus, Calendar, Clock,
@@ -7,6 +8,7 @@ import {
 import { QueueTicket, NotaryDocument, Customer } from "../types";
 import { documentsApi, customersApi } from "../api/documents.api";
 import { appointmentsApi, toUiAppointment } from "../api/appointments.api";
+import { queueApi } from "../api/queue.api";
 import { getAccessToken, ApiException } from "../api/client";
 
 interface DeskCustomer {
@@ -202,10 +204,11 @@ export default function EmployeePortal({
   const loadDeskData = useCallback(async () => {
     setDeskLoading(true);
     try {
-      const [docsRes, custsRes, appsRes] = await Promise.all([
+      const [docsRes, custsRes, appsRes, queueRes] = await Promise.all([
         documentsApi.list({ limit: 100 }),
         customersApi.list(),
         appointmentsApi.list({ limit: 100 }),
+        queueApi.list(branchId),
       ]);
       setLocalDocs(docsRes.documents);
       setCustomers(custsRes.customers.map(customerToDesk));
@@ -219,12 +222,13 @@ export default function EmployeePortal({
           status: ui.status,
         };
       }));
+      setLocalQueue(queueRes.tickets);
     } catch (err) {
       console.error("[EmployeePortal] Failed to load desk data:", err);
     } finally {
       setDeskLoading(false);
     }
-  }, []);
+  }, [branchId]);
 
   useEffect(() => { loadDeskData(); }, [loadDeskData]);
 
@@ -499,35 +503,28 @@ export default function EmployeePortal({
     } catch (err) {
       console.warn("[EmployeePortal] Check-in status sync failed:", err);
     }
-    const queueNo = `A-${Math.floor(16 + Math.random() * 50)}`;
-    const newTicket: QueueTicket = {
-      id: "q-" + Date.now(),
-      ticket_number: queueNo,
-      customer_name,
-      service_type,
-      check_in_time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      status: "waiting"
-    };
-    setLocalQueue(prev => [...prev, newTicket]);
-    addNotification("Customer Checked In", `Assigned slot ${queueNo} for ${customer_name} on queue monitor.`, "success");
+    try {
+      const res = await queueApi.checkIn({
+        customerName: customer_name,
+        serviceType: service_type,
+        branchId,
+      });
+      setLocalQueue(prev => [...prev, res.ticket]);
+      addNotification(
+        "Customer Checked In",
+        `Assigned slot ${res.ticket.ticket_number} for ${customer_name} on queue monitor.`,
+        "success"
+      );
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to issue queue ticket.");
+      return;
+    }
     setActiveTab("queue");
   };
 
-  // Queue paging management
   const handleIssueManualTicket = (e: React.FormEvent) => {
     e.preventDefault();
-    const prefix = ["A", "B", "C"][Math.floor(Math.random() * 3)];
-    const num = Math.floor(16 + Math.random() * 50);
-    const newTicket: QueueTicket = {
-      id: "q-" + Date.now(),
-      ticket_number: `${prefix}-${num}`,
-      customer_name: appForm.customer_name || "Walk-in Guest",
-      service_type: appForm.service_type,
-      check_in_time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      status: "waiting"
-    };
-    setLocalQueue(prev => [...prev, newTicket]);
-    addNotification("Ticket Issued", `${newTicket.ticket_number} generated`, "success");
+    setActiveTab("queue");
     setAppForm({ customer_name: "", service_type: "Power of Attorney", date: "", time: "" });
   };
 
@@ -1057,129 +1054,9 @@ export default function EmployeePortal({
             </div>
           )}
 
-          {/* TAB 2: LOBBY & QUEUE OFFICE MANAGER */}
+          {/* TAB 2: QUEUE MANAGEMENT SYSTEM */}
           {activeTab === "queue" && (
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-              
-              {/* Active display board (5 columns) */}
-              <div className="md:col-span-5 bg-white border border-slate-200 p-5 rounded-xl shadow-sm flex flex-col justify-between space-y-4">
-                <div>
-                  <span className="text-[10px] font-mono text-slate-400 block uppercase font-extrabold tracking-wider">LOBBY RECEPTION BOARD</span>
-                  
-                  {/* Servicing display */}
-                  <div className="mt-4 bg-slate-950 border border-slate-800 text-white rounded-2xl p-6 text-center space-y-1 relative overflow-hidden">
-                    <span className="text-[10px] tracking-widest text-emerald-400 font-mono block uppercase">NOW SERVING AT DESK 2</span>
-                    <span className="text-5xl font-mono tracking-tight text-white block py-2">
-                      {localQueue.find(q => q.status === "serving")?.ticket_number || "A-12"}
-                    </span>
-                    <p className="text-xs text-slate-300 font-sans truncate font-bold">
-                      Caller: {localQueue.find(q => q.status === "serving")?.customer_name || "Ahmed Ali"}
-                    </p>
-                  </div>
-
-                  {/* Lobby waiting list */}
-                  <div className="mt-4 space-y-2 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
-                    <span className="text-[9px] font-mono text-slate-500 block uppercase font-bold">LOBBY WAITLIST</span>
-                    <div className="flex flex-wrap gap-1.5 pt-1">
-                      {localQueue.filter(q => q.status === "waiting").map(q => (
-                        <span key={q.id} className="bg-white border border-slate-200 px-2 py-1 rounded-lg text-xs font-mono font-bold text-slate-700 shadow-xs">
-                          {q.ticket_number}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <button onClick={handleCallNextTicket} className="w-full bg-blue-600 hover:bg-blue-500 text-xs font-extrabold text-white py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition">
-                    <Volume2 className="w-4 h-4" /> PAGER: Call Next Customer
-                  </button>
-                  <p className="text-[10px] text-slate-450 text-center">Triggers station paging screen and broadcasts sound chimes.</p>
-                </div>
-              </div>
-
-              {/* Manual Ticket Issuer & Admin (7 columns) */}
-              <div className="md:col-span-7 bg-white border border-slate-200 p-5 rounded-xl shadow-sm space-y-4">
-                <div className="flex justify-between items-center pb-2 border-b border-slate-100">
-                  <span className="text-[10px] font-mono text-slate-400 block uppercase font-bold">Desk Queue Lobby Registry</span>
-                  <span className="text-[10px] bg-emerald-50 text-emerald-700 font-bold px-2 py-0.5 rounded">Active Live Tracker</span>
-                </div>
-
-                <div className="space-y-2.5 max-h-[320px] overflow-y-auto pr-1">
-                  {localQueue.map(tic => (
-                    <div key={tic.id} className="p-3 bg-slate-50 hover:bg-slate-100/50 rounded-xl border border-slate-200 flex items-center justify-between transition text-xs">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-slate-900 font-extrabold text-sm">{tic.ticket_number}</span>
-                          <span className={`px-2 py-0.5 text-[9px] font-bold rounded-full font-sans uppercase ${
-                            tic.status === "serving" ? "bg-emerald-100 text-emerald-800 border border-emerald-250" :
-                            tic.status === "calling" ? "bg-amber-100 text-amber-800 border border-amber-200 animate-pulse" :
-                            tic.status === "passed" ? "bg-slate-200 text-slate-600" :
-                            "bg-blue-50 text-blue-700"
-                          }`}>{tic.status}</span>
-                        </div>
-                        <p className="text-slate-800 font-sans mt-0.5">Customer: <b>{tic.customer_name}</b></p>
-                        <p className="text-[10px] text-slate-500 font-mono mt-0.5">Service: {tic.service_type} • Time: {tic.checkInTime}</p>
-                      </div>
-
-                      <div className="flex gap-1.5">
-                        {tic.status === "waiting" && (
-                          <button onClick={() => {
-                            setLocalQueue(prev => prev.map(q => q.id === tic.id ? { ...q, status: "calling" as const, called_counter: 2 } : q));
-                            onAnnounceTicket(tic, 2);
-                          }} className="bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold px-2 py-1 rounded transition">
-                            Call Desk 2
-                          </button>
-                        )}
-                        {tic.status === "calling" && (
-                          <button onClick={() => {
-                            setLocalQueue(prev => prev.map(q => q.id === tic.id ? { ...q, status: "serving" as const } : q));
-                          }} className="bg-emerald-600 hover:bg-emerald-505 text-white text-[11px] font-bold px-2 py-1 rounded transition">
-                            Begin Serving
-                          </button>
-                        )}
-                        {tic.status === "serving" && (
-                          <div className="flex gap-1">
-                            <button onClick={() => handleCompleteTicket(tic.id)} className="bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-[11px] px-2 py-1 rounded transition">
-                              Complete
-                            </button>
-                            <button onClick={() => handleSkipTicket(tic.id)} className="bg-slate-100 text-slate-600 hover:bg-slate-200 font-bold text-[11px] px-2 py-1 rounded transition">
-                              Skip
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Issuing custom ticket */}
-                <form onSubmit={handleIssueManualTicket} className="pt-3 border-t border-slate-100 flex gap-2">
-                  <input
-                    type="text"
-                    required
-                    placeholder="Walk-in Client Name"
-                    value={appForm.customer_name}
-                    onChange={(e) => setAppForm(p => ({ ...p, customer_name: e.target.value }))}
-                    className="flex-1 bg-white border border-slate-200 p-2 text-xs rounded-lg outline-none"
-                  />
-                  <select
-                    value={appForm.service_type}
-                    onChange={(e) => setAppForm(p => ({ ...p, service_type: e.target.value }))}
-                    className="bg-white border border-slate-200 p-2 text-xs rounded-lg outline-none"
-                  >
-                    <option value="Power of Attorney">Power of Attorney</option>
-                    <option value="Affidavit">Affidavit</option>
-                    <option value="Escrow Signing">Escrow Signing</option>
-                  </select>
-                  <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold px-4 rounded-lg transition shrink-0">
-                    + Issue Ticket
-                  </button>
-                </form>
-
-              </div>
-
-            </div>
+            <QueuePanel branchId={branchId} />
           )}
 
           {/* TAB 3: BOOKINGS & CALENDAR COORDINATOR */}

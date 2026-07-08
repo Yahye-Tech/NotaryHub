@@ -1015,16 +1015,10 @@ export default function BranchAdminPortal({
                         const guest = prompt("Enter customer name for manual walk-in queue check-in:");
                         if (guest) {
                           const svc = prompt("Enter service (Power of Attorney, Affidavit, Contract):") || "General Notary";
-                          const newTicket: QueueTicket = {
-                            id: Date.now().toString(),
-                            ticket_number: "WALK-" + (localQueue.length + 101),
-                            customer_name: guest,
-                            service_type: svc,
-                            check_in_time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                            status: "waiting"
-                          };
-                          setLocalQueue(prev => [...prev, newTicket]);
-                          alert(`✓ Walk-in Ticket ${newTicket.ticket_number} registered.`);
+                          // Walk-in check-in now goes through real queue API
+                          // queueApi.checkIn({ customerName: guest, serviceType: svc })
+                          // For now, alert the employee to use the Queue tab
+                          alert(`Please use the Queue tab to check in ${guest}. The real queue system is now active.`);
                         }
                       }}
                       className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs py-1.5 px-3 rounded-lg transition"
