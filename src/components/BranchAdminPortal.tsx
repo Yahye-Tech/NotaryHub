@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { Branch, Employee, QueueTicket, NotaryDocument, Customer } from "../types";
 import { documentsApi, customersApi } from "../api/documents.api";
+import { appointmentsApi, formatAppointmentDisplayTime } from "../api/appointments.api";
 import { getAccessToken, ApiException } from "../api/client";
 
 interface BranchAdminPortalProps {
@@ -100,12 +101,22 @@ export default function BranchAdminPortal({
   const loadDeskData = useCallback(async () => {
     setDeskLoading(true);
     try {
-      const [docsRes, custsRes] = await Promise.all([
+      const [docsRes, custsRes, appsRes] = await Promise.all([
         documentsApi.list({ limit: 100, branchId }),
         customersApi.list(),
+        appointmentsApi.list({ limit: 100, branchId }),
       ]);
       setLocalDocs(docsRes.documents);
       setCustomers(custsRes.customers.map(customerToAdmin));
+      setLocalApps(appsRes.appointments.map(a => ({
+        id: a.id,
+        branchId: a.branch_id,
+        customer_name: a.customer_name,
+        customerEmail: a.customer_email ?? undefined,
+        service_type: a.service_type,
+        appointmentTime: formatAppointmentDisplayTime(a.start_time),
+        status: a.status === "cancelled" ? "canceled" : a.status,
+      })));
     } catch (err) {
       console.error("[BranchAdminPortal] Failed to load desk data:", err);
     } finally {
@@ -283,12 +294,17 @@ export default function BranchAdminPortal({
   };
 
   // Appointment alterations
-  const handleCancelApp = (id: string) => {
-    setLocalApps(prev => prev.map(app => app.id === id ? { ...app, status: "canceled" as const } : app));
-    setNotifications(prev => [
-      { id: Date.now().toString(), type: "alert", title: "Appointment Canceled", details: "Client itinerary item was flagged canceled in Bosaso CRM.", date: "Just now" },
-      ...prev
-    ]);
+  const handleCancelApp = async (id: string) => {
+    try {
+      await appointmentsApi.transition(id, "cancelled");
+      setLocalApps(prev => prev.map(app => app.id === id ? { ...app, status: "canceled" as const } : app));
+      setNotifications(prev => [
+        { id: Date.now().toString(), type: "alert", title: "Appointment Canceled", details: "Booking cancelled in the system.", date: "Just now" },
+        ...prev
+      ]);
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to cancel appointment.");
+    }
   };
 
   const triggerReassignApp = (target: Appointment) => {
@@ -743,8 +759,8 @@ export default function BranchAdminPortal({
                     <span className="text-[10px] text-slate-500 font-mono font-bold uppercase tracking-wider block">Appointments Today</span>
                     <Calendar className="w-4 h-4 text-indigo-600" />
                   </div>
-                  <span className="block text-2xl font-extrabold text-slate-900 mt-2">{appointments.length > 0 ? 18 : 0}</span>
-                  <span className="text-[9.5px] font-mono text-slate-500 block mt-1">{appointments.length > 0 ? "4 pending fasttrack" : "0 fasttrack pending"}</span>
+                  <span className="block text-2xl font-extrabold text-slate-900 mt-2">{localApps.length}</span>
+                  <span className="text-[9.5px] font-mono text-slate-500 block mt-1">{localApps.filter(a => a.status === "scheduled").length} scheduled today</span>
                 </div>
 
                 <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-xs">

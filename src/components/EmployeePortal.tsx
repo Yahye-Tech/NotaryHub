@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { QueueTicket, NotaryDocument, Customer } from "../types";
 import { documentsApi, customersApi } from "../api/documents.api";
+import { appointmentsApi, toUiAppointment } from "../api/appointments.api";
 import { getAccessToken, ApiException } from "../api/client";
 
 interface DeskCustomer {
@@ -201,12 +202,23 @@ export default function EmployeePortal({
   const loadDeskData = useCallback(async () => {
     setDeskLoading(true);
     try {
-      const [docsRes, custsRes] = await Promise.all([
+      const [docsRes, custsRes, appsRes] = await Promise.all([
         documentsApi.list({ limit: 100 }),
         customersApi.list(),
+        appointmentsApi.list({ limit: 100 }),
       ]);
       setLocalDocs(docsRes.documents);
       setCustomers(custsRes.customers.map(customerToDesk));
+      setLocalAppointments(appsRes.appointments.map(a => {
+        const ui = toUiAppointment(a);
+        return {
+          id: ui.id,
+          customer_name: ui.customerName,
+          service_type: ui.serviceType,
+          appointmentTime: ui.appointmentTime,
+          status: ui.status,
+        };
+      }));
     } catch (err) {
       console.error("[EmployeePortal] Failed to load desk data:", err);
     } finally {
@@ -417,29 +429,76 @@ export default function EmployeePortal({
   };
 
   // Appointments Logic
-  const handleCreateAppointment = (e: React.FormEvent) => {
+  const handleCreateAppointment = async (e: React.FormEvent) => {
     e.preventDefault();
-    const added = {
-      id: "ap-" + Date.now(),
-      customer_name: appForm.customer_name || "Anonymous Customer",
-      service_type: appForm.service_type,
-      appointmentTime: `${appForm.date} @ ${appForm.time}`,
-      status: "scheduled" as const
-    };
-    setLocalAppointments(prev => [added, ...prev]);
-    addNotification("Appointment Scheduled", `${added.customer_name} set for ${added.appointmentTime}`, "info");
-    setAppForm({ customer_name: "", service_type: "Power of Attorney", date: "", time: "" });
-  };
-
-  const handleReschedule = (id: string) => {
-    const promptTime = prompt("Enter new schedule text (e.g. 2026-06-15 @ 04:30 PM):");
-    if (promptTime) {
-      setLocalAppointments(prev => prev.map(ap => ap.id === id ? { ...ap, appointmentTime: promptTime } : ap));
-      addNotification("Appointment Rescheduled", "Calendar schedules synchronized.", "info");
+    if (!branchId) {
+      alert("No branch assigned to your account. Contact your administrator.");
+      return;
+    }
+    try {
+      const res = await appointmentsApi.create({
+        branchId,
+        customerName: appForm.customer_name || "Anonymous Customer",
+        serviceType: appForm.service_type,
+        appointmentDate: appForm.date,
+        appointmentTime: appForm.time,
+      });
+      const ui = toUiAppointment(res.appointment);
+      setLocalAppointments(prev => [{
+        id: ui.id,
+        customer_name: ui.customerName,
+        service_type: ui.serviceType,
+        appointmentTime: ui.appointmentTime,
+        status: ui.status,
+      }, ...prev]);
+      addNotification("Appointment Scheduled", `${ui.customerName} set for ${ui.appointmentTime}`, "info");
+      setAppForm({ customer_name: "", service_type: "Power of Attorney", date: "", time: "" });
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to book appointment.");
     }
   };
 
-  const handleCheckInCustomer = (customer_name: string, service_type: string) => {
+  const handleReschedule = async (id: string) => {
+    const newDate = prompt("Enter new date (YYYY-MM-DD):");
+    if (!newDate) return;
+    const newTime = prompt("Enter new time (e.g. 10:30 AM):");
+    if (!newTime) return;
+    try {
+      const res = await appointmentsApi.update(id, {
+        appointmentDate: newDate,
+        appointmentTime: newTime,
+      });
+      const ui = toUiAppointment(res.appointment);
+      setLocalAppointments(prev => prev.map(ap => ap.id === id ? {
+        id: ui.id,
+        customer_name: ui.customerName,
+        service_type: ui.serviceType,
+        appointmentTime: ui.appointmentTime,
+        status: ui.status,
+      } : ap));
+      addNotification("Appointment Rescheduled", "Calendar schedules synchronized.", "info");
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to reschedule appointment.");
+    }
+  };
+
+  const handleCancelAppointment = async (id: string, customerName: string) => {
+    try {
+      await appointmentsApi.transition(id, "cancelled");
+      setLocalAppointments(prev => prev.map(a => a.id === id ? { ...a, status: "canceled" as const } : a));
+      addNotification("Booking Canceled", `Canceled schedule for ${customerName}`, "warn");
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to cancel appointment.");
+    }
+  };
+
+  const handleCheckInCustomer = async (appointmentId: string, customer_name: string, service_type: string) => {
+    try {
+      await appointmentsApi.transition(appointmentId, "checked_in");
+      setLocalAppointments(prev => prev.map(a => a.id === appointmentId ? { ...a, status: "checked_in" } : a));
+    } catch (err) {
+      console.warn("[EmployeePortal] Check-in status sync failed:", err);
+    }
     const queueNo = `A-${Math.floor(16 + Math.random() * 50)}`;
     const newTicket: QueueTicket = {
       id: "q-" + Date.now(),
@@ -1148,16 +1207,13 @@ export default function EmployeePortal({
                       <div className="flex flex-col gap-1 shrink-0">
                         {ap.status === "scheduled" && (
                           <>
-                            <button onClick={() => handleCheckInCustomer(ap.customer_name, ap.service_type)} className="bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold py-1 px-2.5 rounded transition">
+                            <button onClick={() => handleCheckInCustomer(ap.id, ap.customer_name, ap.service_type)} className="bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold py-1 px-2.5 rounded transition">
                               Check In Lobby
                             </button>
                             <button onClick={() => handleReschedule(ap.id)} className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-[10px] font-bold py-1 px-2.5 rounded transition">
                               Reschedule
                             </button>
-                            <button onClick={() => {
-                              setLocalAppointments(prev => prev.map(a => a.id === ap.id ? { ...a, status: "canceled" as const } : a));
-                              addNotification("Booking Canceled", `Canceled schedule for ${ap.customer_name}`, "warn");
-                            }} className="bg-white hover:bg-red-50 hover:text-red-600 text-slate-400 border border-slate-200 text-[10px] py-1 px-2.5 rounded transition">
+                            <button onClick={() => handleCancelAppointment(ap.id, ap.customer_name)} className="bg-white hover:bg-red-50 hover:text-red-600 text-slate-400 border border-slate-200 text-[10px] py-1 px-2.5 rounded transition">
                               Cancel Booking
                             </button>
                           </>

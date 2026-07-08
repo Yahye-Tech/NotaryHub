@@ -1,7 +1,7 @@
 type Invoice = { id: string; invoiceNumber?: string; customerName: string; amount: number; dueDate: string; status: string; items?: { description: string; price: number }[] };
 type Appointment = { id: string; branchId?: string; customerName: string; serviceType: string; appointmentTime: string; status: string; customerEmail?: string };
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { 
   User, Calendar, Clock, CreditCard, ShieldCheck, Download, 
   QrCode, RefreshCw, CheckCircle, PlusCircle, XCircle, Trash2, 
@@ -11,6 +11,8 @@ import {
   Building, MapPin, ShieldAlert, ArrowRight, Printer, AlertTriangle, CheckSquare, Menu, X, Sun, Moon
 } from "lucide-react";
 import { Branch, NotaryDocument } from "../types";
+import { appointmentsApi, toUiAppointment } from "../api/appointments.api";
+import { ApiException } from "../api/client";
 
 interface CustomerPortalProps {
   branches: Branch[];
@@ -68,6 +70,31 @@ export default function CustomerPortal({
   const [customerEmail] = useState("ahmed.ali@example.com");
   const [customerPassword, setCustomerPassword] = useState("••••••••••••");
   const [avatarUrl, setAvatarUrl] = useState("https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150");
+
+  const [bookedAppointments, setBookedAppointments] = useState<Appointment[]>(appointments);
+  const [bookingSubmitting, setBookingSubmitting] = useState(false);
+
+  const loadAppointments = useCallback(async () => {
+    try {
+      const res = await appointmentsApi.list({ limit: 50 });
+      setBookedAppointments(res.appointments.map(a => {
+        const ui = toUiAppointment(a);
+        return {
+          id: ui.id,
+          branchId: ui.branchId,
+          customerName: ui.customerName,
+          serviceType: ui.serviceType,
+          appointmentTime: ui.appointmentTime,
+          status: ui.status,
+          customerEmail: ui.customerEmail,
+        };
+      }));
+    } catch (err) {
+      console.error("[CustomerPortal] Failed to load appointments:", err);
+    }
+  }, []);
+
+  useEffect(() => { loadAppointments(); }, [loadAppointments]);
 
   // Notifications channels preferences
   const [channelPrefs, setChannelPrefs] = useState({
@@ -252,27 +279,66 @@ export default function CustomerPortal({
   }, [aiAssistantChats]);
 
   // Handlers
-  const handleAddNewApp = (e: React.FormEvent) => {
+  const handleAddNewApp = async (e: React.FormEvent) => {
     e.preventDefault();
-    onBookAppointment(bookingBranchId, customerName, customerEmail, bookingService, `${bookingDate} @ ${bookingTime}`);
-    
-    // Add success notification
-    const branchName = branches.find(b => b.id === bookingBranchId)?.name || "Bosaso Main Branch";
-    setNotifications(prev => [
-      {
-        id: "not-" + Date.now(),
-        title: "Appointment Booked Successfully",
-        text: `Your ${bookingService} appointment at ${branchName} is scheduled for ${bookingDate} at ${bookingTime}.`,
-        channel: "In-App",
-        time: "Just now",
-        unread: true
-      },
-      ...prev
-    ]);
+    if (!bookingBranchId) {
+      alert("Please select a branch for your appointment.");
+      return;
+    }
+    setBookingSubmitting(true);
+    try {
+      await appointmentsApi.create({
+        branchId: bookingBranchId,
+        customerName,
+        customerEmail,
+        serviceType: bookingService,
+        appointmentDate: bookingDate,
+        appointmentTime: bookingTime,
+      });
+      onBookAppointment(bookingBranchId, customerName, customerEmail, bookingService, `${bookingDate} @ ${bookingTime}`);
+      await loadAppointments();
 
-    alert(`✓ Appointment Draft Synchronized!\nYour booking for ${bookingService} was recorded on the Veritas Ledger.\nDate: ${bookingDate}\nTime: ${bookingTime}\nBranch: ${branchName}`);
-    setBookingStep(1); // Reset step 
-    setActiveTab("dashboard"); // Go back to dashboard to review
+      const branchName = branches.find(b => b.id === bookingBranchId)?.name || "Bosaso Main Branch";
+      setNotifications(prev => [
+        {
+          id: "not-" + Date.now(),
+          title: "Appointment Booked Successfully",
+          text: `Your ${bookingService} appointment at ${branchName} is scheduled for ${bookingDate} at ${bookingTime}.`,
+          channel: "In-App",
+          time: "Just now",
+          unread: true
+        },
+        ...prev
+      ]);
+
+      alert(`✓ Appointment Booked!\nYour booking for ${bookingService} was recorded.\nDate: ${bookingDate}\nTime: ${bookingTime}\nBranch: ${branchName}`);
+      setBookingStep(1);
+      setActiveTab("dashboard");
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to book appointment.");
+    } finally {
+      setBookingSubmitting(false);
+    }
+  };
+
+  const handleCancelAppointment = async (id: string) => {
+    try {
+      await appointmentsApi.transition(id, "cancelled");
+      setBookedAppointments(prev => prev.map(a => a.id === id ? { ...a, status: "canceled" } : a));
+      setNotifications(prev => [
+        {
+          id: "not-" + Date.now(),
+          title: "Appointment Canceled",
+          text: "Your appointment was canceled and the branch has been notified.",
+          channel: "In-App",
+          time: "Just now",
+          unread: true
+        },
+        ...prev
+      ]);
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to cancel appointment.");
+    }
   };
 
   const executeQRVerification = (customCode?: string) => {
@@ -995,10 +1061,11 @@ export default function CustomerPortal({
                           Modify Parameters
                         </button>
                         <button 
-                          type="submit" 
-                          className="w-2/3 bg-emerald-600 hover:bg-emerald-550 text-white text-xs font-extrabold py-2.5 rounded-xl transition shadow-sm"
+                          type="submit"
+                          disabled={bookingSubmitting}
+                          className="w-2/3 bg-emerald-600 hover:bg-emerald-550 disabled:opacity-60 text-white text-xs font-extrabold py-2.5 rounded-xl transition shadow-sm"
                         >
-                          Confirm & Block Session ✓
+                          {bookingSubmitting ? "Booking…" : "Confirm & Block Session ✓"}
                         </button>
                       </div>
                     </form>
@@ -1040,10 +1107,11 @@ export default function CustomerPortal({
                         </button>
                         <button 
                           onClick={() => {
-                            // Non-blocking in-app cancel status indicator
-                            alert("Appointment slot canceled successfully. Host notified.");
+                            const next = bookedAppointments.find(a => a.status === "scheduled");
+                            if (next) handleCancelAppointment(next.id);
                           }}
-                          className="bg-red-50 text-[10.5px] text-red-700 hover:bg-red-100 font-bold px-2.5 py-1.5 rounded-md transition"
+                          disabled={!bookedAppointments.some(a => a.status === "scheduled")}
+                          className="bg-red-50 text-[10.5px] text-red-700 hover:bg-red-100 font-bold px-2.5 py-1.5 rounded-md transition disabled:opacity-40"
                         >
                           Cancel Appointment
                         </button>
@@ -1051,7 +1119,7 @@ export default function CustomerPortal({
                     </div>
 
                     {/* Prop-driven appointments */}
-                    {appointments.map(app => (
+                    {bookedAppointments.map(app => (
                       <div key={app.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs">
                         <div className="flex justify-between items-start">
                           <div>
@@ -1065,6 +1133,14 @@ export default function CustomerPortal({
                           <Clock className="w-3.5 h-3.5" />
                           {app.appointmentTime}
                         </div>
+                        {app.status === "scheduled" && (
+                          <button
+                            onClick={() => handleCancelAppointment(app.id)}
+                            className="mt-2 text-[10px] text-red-600 hover:text-red-800 font-bold"
+                          >
+                            Cancel
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
