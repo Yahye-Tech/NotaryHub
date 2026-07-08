@@ -6,6 +6,8 @@ import {
   getDocumentsByTenant,
   getDocumentsByBranch,
   getDocumentById,
+  getDocumentsForCustomer,
+  customerOwnsDocument,
   createDocument,
   updateDocumentContent,
   transitionDocumentStatus,
@@ -45,7 +47,7 @@ function getTenantId(req: Request): string {
 // GET /api/documents
 // List documents for the caller's tenant (filtered by status, type, branch)
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/", requireAuth, requireMinRole("EMPLOYEE"), async (req: Request, res: Response) => {
+router.get("/", requireAuth, requireMinRole("CUSTOMER"), async (req: Request, res: Response) => {
   const tenantId = req.user!.tenantId;
   if (!tenantId && req.user!.role !== "SUPER_ADMIN") {
     res.status(400).json({ error: "NO_TENANT", message: "No tenant associated with this account" });
@@ -54,19 +56,34 @@ router.get("/", requireAuth, requireMinRole("EMPLOYEE"), async (req: Request, re
 
   const { status, docType, branchId, limit, offset } = req.query as Record<string, string>;
 
-  // EMPLOYEE and BRANCH_ADMIN can only see their branch's documents
-  let scopedBranchId = branchId;
-  if (req.user!.role === "EMPLOYEE" || req.user!.role === "BRANCH_ADMIN") {
-    const { rows } = await import("../db/pool.js").then(m =>
-      m.query<{ branch_id: string }>(
-        `SELECT branch_id FROM employees WHERE user_id = $1 AND is_deleted = FALSE`,
-        [req.user!.sub]
-      )
-    );
-    scopedBranchId = rows[0]?.branch_id;
-  }
-
   try {
+    if (req.user!.role === "CUSTOMER") {
+      const result = await getDocumentsForCustomer(
+        tenantId!,
+        req.user!.sub,
+        req.user!.email,
+        {
+          status: status as DocumentStatus,
+          limit: limit ? parseInt(limit, 10) : 50,
+          offset: offset ? parseInt(offset, 10) : 0,
+        }
+      );
+      res.json(result);
+      return;
+    }
+
+    // EMPLOYEE and BRANCH_ADMIN can only see their branch's documents
+    let scopedBranchId = branchId;
+    if (req.user!.role === "EMPLOYEE" || req.user!.role === "BRANCH_ADMIN") {
+      const { rows } = await import("../db/pool.js").then(m =>
+        m.query<{ branch_id: string }>(
+          `SELECT branch_id FROM employees WHERE user_id = $1 AND is_deleted = FALSE`,
+          [req.user!.sub]
+        )
+      );
+      scopedBranchId = rows[0]?.branch_id;
+    }
+
     if (scopedBranchId && req.user!.role !== "COMPANY_ADMIN" && req.user!.role !== "SUPER_ADMIN") {
       const documents = await getDocumentsByBranch(scopedBranchId, tenantId!);
       res.json({ documents, total: documents.length });
@@ -89,7 +106,7 @@ router.get("/", requireAuth, requireMinRole("EMPLOYEE"), async (req: Request, re
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/documents/:id
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/:id", requireAuth, requireMinRole("EMPLOYEE"),
+router.get("/:id", requireAuth, requireMinRole("CUSTOMER"),
   [param("id").isUUID()],
   async (req: Request, res: Response) => {
     if (!validate(req, res)) return;
@@ -105,6 +122,20 @@ router.get("/:id", requireAuth, requireMinRole("EMPLOYEE"),
       res.status(404).json({ error: "NOT_FOUND", message: "Document not found" });
       return;
     }
+
+    if (req.user!.role === "CUSTOMER") {
+      const owns = await customerOwnsDocument(
+        tenantId,
+        req.params.id,
+        req.user!.sub,
+        req.user!.email
+      );
+      if (!owns) {
+        res.status(403).json({ error: "FORBIDDEN", message: "You cannot view this document" });
+        return;
+      }
+    }
+
     res.json({ document: doc });
   }
 );
