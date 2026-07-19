@@ -99,13 +99,22 @@ export default function CompanyAdminPortal({
   // Right AI Assistant sidebar state
   const [showRightPanel, setShowRightPanel] = useState(false);
 
-  // Notifications dropdown simulation
+  // Notifications dropdown — populated from the real audit log
   const [showNotificationList, setShowNotificationList] = useState(false);
-  const [notifications, setNotifications] = useState([
-    { id: 1, text: "New appointment scheduled for Bosaso Main Branch", time: "5 mins ago", read: false },
-    { id: 2, text: "Document #NOT-101 watermark cert compiled successfully", time: "12 mins ago", read: false },
-    { id: 3, text: "Daily credit payout cleared via Stripe API node", time: "1 hr ago", read: true }
-  ]);
+  const [notifications, setNotifications] = useState<{ id: string; text: string; time: string; read: boolean }[]>([]);
+
+  useEffect(() => {
+    auditApi.list({ limit: 5 })
+      .then(res => {
+        setNotifications(res.logs.map(log => ({
+          id: log.id,
+          text: `${log.action.replace(/_/g, " ")}${log.resource_label ? ` — ${log.resource_label}` : ""}`,
+          time: new Date(log.created_at).toLocaleString(),
+          read: false,
+        })));
+      })
+      .catch(() => setNotifications([]));
+  }, []);
 
   // Brand customize states
   const [primaryColor, setPrimaryColor] = useState("#2563EB");

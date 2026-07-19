@@ -23,12 +23,12 @@ export default function ArchitectureMap() {
       tech: "React 19, Tailwind CSS, Lucide, Recharts",
       ports: "80 / 443 -> 3000",
       metrics: "Load Time: ~1.2s | Client State: Local/Context",
-      description: "Rich SPA interface utilizing custom e-signature pads, fingerprint simulators, and a robust status tracking engine.",
+      description: "SPA interface handling multi-tenant branding, role-based portals, and real-time-feeling queue/document status via polling.",
       details: [
         "Resolves tenant subdomains (e.g. tenant-a.notary.saas) to inject branding.",
-        "Draws custom canvas biometric signatures and exports standard vectors.",
-        "Polls REST endpoints & opens WebSocket connections for live Queue Calling.",
-        "Securely stores JWT in HttpOnly Cookies or secure sessionStorage."
+        "Renders document status, queue tickets, and audit trails from live API data.",
+        "Polls REST endpoints for queue and document status updates.",
+        "Holds the JWT access token in memory (module-level state); refresh token lives in an HttpOnly cookie."
       ]
     },
     {

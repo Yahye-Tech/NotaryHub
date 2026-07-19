@@ -397,7 +397,7 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
         
         {/* TOP BAR (Search + Alerts + Context switcher) */}
         <div className="bg-white border border-slate-200 p-3.5 rounded-2xl flex items-center justify-between gap-4" id="saas-topbar">
-          {/* Simulated Search bar */}
+          {/* Global search bar — filters the tenant directory table below */}
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
             <input
@@ -704,20 +704,6 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
                       </div>
                     </div>
 
-                    <div>
-                      <h4 className="text-xs font-mono font-bold text-slate-400 uppercase tracking-wider">Resource Allocation graph</h4>
-                      <div className="h-32 mt-2">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={[]}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                            <XAxis dataKey="time" stroke="#94a3b8" />
-                            <YAxis stroke="#94a3b8" />
-                            <Tooltip contentStyle={{ backgroundColor: '#ffffff', borderColor: '#e2e8f0' }} />
-                            <Bar dataKey="cpu" fill="#0f766e" name="Isolated CPU Engine %" />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
                   </div>
                 )}
 
@@ -807,36 +793,20 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
                   ))}
                 </div>
 
-                {/* REVENUE LINE GRAPH COZY SECTOR */}
+                {/* REVENUE & GROWTH — real charts live in the Analytics tab; this links there
+                    rather than showing a duplicate chart with no data source. */}
                 <div className="bg-white border border-slate-200 p-4.5 rounded-2xl">
                   <div className="flex items-center justify-between pb-3 mb-2 border-b border-slate-100">
                     <div>
-                      <h3 className="text-xs font-mono font-bold text-slate-450 uppercase tracking-wider">Global Revenue & Subscription growth trend</h3>
-                      <p className="text-[10px] text-slate-400 mt-0.5">Dynamic MRR simulation mapped from active corporate tiers</p>
+                      <h3 className="text-xs font-mono font-bold text-slate-450 uppercase tracking-wider">Global Revenue & Subscription Growth</h3>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Real, DB-backed revenue and growth charts are available in Analytics</p>
                     </div>
-                    <span className="text-[11px] font-mono text-blue-600 font-bold bg-blue-50 px-2.5 py-0.5 rounded">Platform Run-Rate: Active</span>
-                  </div>
-                  <div className="h-56 mt-3">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={[]}>
-                        <defs>
-                          <linearGradient id="colorRequests" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#2563EB" stopOpacity={0.15}/>
-                            <stop offset="95%" stopColor="#2563EB" stopOpacity={0.01}/>
-                          </linearGradient>
-                          <linearGradient id="colorActiveUsers" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#0F766E" stopOpacity={0.1}/>
-                            <stop offset="95%" stopColor="#0F766E" stopOpacity={0.01}/>
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                        <XAxis dataKey="time" stroke="#94a3b8" style={{ fontSize: 10 }} />
-                        <YAxis stroke="#94a3b8" style={{ fontSize: 10 }} />
-                        <Tooltip contentStyle={{ backgroundColor: '#ffffff', borderColor: '#e2e8f0', fontSize: 11, borderRadius: '8px' }} />
-                        <Area type="monotone" dataKey="requests" stroke="#2563EB" strokeWidth={1.5} fill="url(#colorRequests)" name="Monthly Completed Signatures" />
-                        <Area type="monotone" dataKey="activeUsers" stroke="#0F766E" strokeWidth={1.5} fill="url(#colorActiveUsers)" name="Weekly Active Registrations" />
-                      </AreaChart>
-                    </ResponsiveContainer>
+                    <button
+                      onClick={() => setActiveSubTab("analytics")}
+                      className="text-[11px] font-mono text-blue-600 font-bold bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded transition"
+                    >
+                      View Analytics →
+                    </button>
                   </div>
                 </div>
 
@@ -976,7 +946,14 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 whitespace-nowrap">
-                        {tenants.map(tenant => {
+                        {tenants
+                          .filter(t =>
+                            !globalSearchTerm.trim() ||
+                            t.name.toLowerCase().includes(globalSearchTerm.toLowerCase()) ||
+                            t.subdomain.toLowerCase().includes(globalSearchTerm.toLowerCase()) ||
+                            t.plan.toLowerCase().includes(globalSearchTerm.toLowerCase())
+                          )
+                          .map(tenant => {
                           const associatedBranches = branches.filter(b => b.tenant_id === tenant.id);
                           const associatedStaff = employees.filter(emp => associatedBranches.map(b => b.id).includes(emp.branch_id));
                           const baseTierCost = plansList.find(p => p.code === tenant.plan)?.price || 799;

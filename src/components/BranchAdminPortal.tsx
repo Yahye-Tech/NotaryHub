@@ -182,7 +182,7 @@ export default function BranchAdminPortal({
   const [reassignAppTarget, setReassignAppTarget] = useState<Appointment | null>(null);
   const [reassignTargetEmp, setReassignTargetEmp] = useState("");
 
-  // Sound paging simulation announcement message
+  // Visual paging toast shown after a real queue call action
   const [broadcastingChime, setBroadcastingChime] = useState<string | null>(null);
 
   // Reports downloader state
@@ -357,11 +357,16 @@ export default function BranchAdminPortal({
     setReassignTargetEmp(localEmployees[0]?.name || "");
   };
 
-  const executeReassignApp = () => {
-    if (!reassignAppTarget) return;
-    setLocalApps(prev => prev.map(app => app.id === reassignAppTarget.id ? { ...app, appointmentTime: `Rescheduled with ${reassignTargetEmp}` } : app));
-    setReassignAppTarget(null);
-    alert(`✓ Booking slot reassigned to officer ${reassignTargetEmp}`);
+  const executeReassignApp = async () => {
+    if (!reassignAppTarget || !reassignTargetEmp) return;
+    try {
+      await appointmentsApi.update(reassignAppTarget.id, { assignedEmployeeId: reassignTargetEmp });
+      const assignedName = localEmployees.find(e => e.id === reassignTargetEmp)?.name ?? "the selected officer";
+      setReassignAppTarget(null);
+      alert(`✓ Booking slot reassigned to ${assignedName}`);
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to reassign appointment.");
+    }
   };
 
   // Document actions
@@ -1338,7 +1343,7 @@ export default function BranchAdminPortal({
                   </div>
                 </div>
 
-                {/* Calendar reassign popover simulated */}
+                {/* Calendar reassign popover — real assignment via appointmentsApi.update */}
                 {reassignAppTarget && (
                   <div className="p-4 bg-slate-100 border border-slate-350 rounded-xl space-y-3 font-sans text-xs">
                     <p className="font-bold text-slate-800">Reassign {reassignAppTarget.customer_name}'s schedule desk:</p>
@@ -1349,7 +1354,7 @@ export default function BranchAdminPortal({
                         className="flex-1 bg-white border border-slate-200 rounded-lg p-2 text-xs"
                       >
                         {localEmployees.map(e => (
-                          <option key={e.id} value={e.name}>{e.name} ({e.role})</option>
+                          <option key={e.id} value={e.id}>{e.name} ({e.role})</option>
                         ))}
                       </select>
                       <button 
@@ -1459,7 +1464,7 @@ export default function BranchAdminPortal({
                   )}
                 </div>
 
-                {/* Review document popover simulated */}
+                {/* Document review popover — real document content */}
                 {selectedDocToReview && (
                   <div className="fixed inset-0 z-50 bg-slate-950/40 flex items-center justify-center p-4">
                     <div className="bg-white border border-slate-300 rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl animate-scaleIn font-sans">
@@ -1473,19 +1478,19 @@ export default function BranchAdminPortal({
                         </button>
                       </div>
 
-                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-150 max-h-[160px] overflow-y-auto font-mono text-[10.5px] leading-relaxed text-slate-700">
-                        <b>DEED CERTIFICATION TEXT BLOCK:</b><br />
-                        I, Warsame Farah, constitute representative courier pickup authorization within Bosaso Port Terminal boundaries. Verified using dual signature overlays.
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-150 max-h-[160px] overflow-y-auto font-mono text-[10.5px] leading-relaxed text-slate-700 whitespace-pre-wrap">
+                        <b>{selectedDocToReview.doc_type.replace(/_/g, " ")} — {selectedDocToReview.document_number}</b><br />
+                        {selectedDocToReview.content || selectedDocToReview.summary || "No document content on file yet."}
                       </div>
 
                       <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-xl text-xs space-y-2">
-                        <span className="font-extrabold text-indigo-950 block">Administrative Audits checks:</span>
+                        <span className="font-extrabold text-indigo-950 block">Document status:</span>
                         <div className="space-y-1.5 font-sans">
                           <div className="flex justify-between text-[11px]">
-                            <span>Identity Document matched:</span> <span className="text-emerald-700 font-bold">Verified ✓</span>
+                            <span>Jurisdiction:</span> <span className="text-slate-700 font-bold">{selectedDocToReview.jurisdiction || "Not specified"}</span>
                           </div>
                           <div className="flex justify-between text-[11px]">
-                            <span>Biometrics Match rate:</span> <span className="text-emerald-700 font-bold">99.4% Match ✓</span>
+                            <span>Current status:</span> <span className="text-indigo-700 font-bold">{selectedDocToReview.status}</span>
                           </div>
                         </div>
                       </div>
