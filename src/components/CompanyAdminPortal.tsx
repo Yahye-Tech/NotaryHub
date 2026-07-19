@@ -3,7 +3,7 @@ import {
   Building2, Users, FileText, Calendar, CreditCard, 
   Settings, RefreshCw, Sparkles, Sliders, Check, 
   HelpCircle, ChevronRight, Bell, Search, Bot, 
-  FileSpreadsheet, ShieldCheck, ToggleLeft, ToggleRight, 
+  FileSpreadsheet, ToggleLeft, ToggleRight, 
   LayoutDashboard, UserCheck, ShieldAlert, LogOut, Menu, X,
   Trash2, Edit, Edit3, Archive, KeyRound, Play, Plus, Clock, Shield, Sun, Moon
 } from "lucide-react";
@@ -17,7 +17,7 @@ import CompanyAdminDocuments from "./company/CompanyAdminDocuments";
 import CompanyAdminAppointments from "./company/CompanyAdminAppointments";
 import CompanyAdminBilling from "./company/CompanyAdminBilling";
 import { settingsApi, auditApi, type AuditLogEntry } from "../api/settings.api";
-import { ApiException } from "../api/client";
+import { ApiException, getAccessToken } from "../api/client";
 
 interface CompanyAdminPortalProps {
   tenants: Tenant[];
@@ -274,27 +274,62 @@ export default function CompanyAdminPortal({
     setChatLoading(true);
 
     try {
+      const token = getAccessToken();
       const response = await fetch("/api/gemini/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: "include",
         body: JSON.stringify({ messages: [{ role: "user", content: term }] })
       });
       const result = await response.json();
-      setChatMessages(prev => [...prev, { role: "model", content: result.reply }]);
-    } catch (err) {
-      setTimeout(() => {
-        setChatMessages(prev => [...prev, { 
-          role: "model", 
-          content: `VERITAS INSIGHT FALLBACK:\nTo ensure compliance with the Electronic Signatures in Global and National Commerce (ESIGN Act), the company should enforce multi-factor authentication (MFA) on all Notary Officer profiles. It looks like Bosaso Main Branch has 8 active waiting tickets; recommend enabling voice announcement chimes.` 
+      if (result.success && result.reply) {
+        setChatMessages(prev => [...prev, { role: "model", content: result.reply }]);
+      } else {
+        setChatMessages(prev => [...prev, {
+          role: "model",
+          content: "I couldn't reach the AI assistant just now. Please try again in a moment."
         }]);
-      }, 1000);
+      }
+    } catch (err) {
+      setChatMessages(prev => [...prev, {
+        role: "model",
+        content: "I couldn't reach the AI assistant just now. Please try again in a moment."
+      }]);
     } finally {
       setChatLoading(false);
     }
   };
 
-  const handleCSVExportMock = () => {
-    alert("Compiling transaction ledgers, biometric logs and client registries...\n\nCompiling database export payload: 'Notary_Company_Export_2026.csv'...\n\nSuccessfully downloaded file.");
+  const handleCSVExport = () => {
+    if (displayAuditLogs.length === 0) {
+      alert("No audit log data available to export yet.");
+      return;
+    }
+    const header = ["Timestamp", "Action", "Resource Type", "Resource", "User ID", "Branch ID", "IP Address"];
+    const rows = displayAuditLogs.map(log => [
+      log.created_at,
+      log.action,
+      log.resource_type ?? "",
+      log.resource_label ?? log.resource_id ?? "",
+      log.user_id ?? "",
+      log.branch_id ?? "",
+      log.ip_address ?? "",
+    ]);
+    const csv = [header, ...rows]
+      .map(row => row.map(cell => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `notary_audit_export_${Date.now()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   useEffect(() => {
@@ -1361,37 +1396,31 @@ export default function CompanyAdminPortal({
           {activeTab === "reports" && (
             <div className="space-y-6" id="reports-compliance-tab">
               
-              {/* Compliance dashboard statistics */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                
+              {/* Audit log summary statistics (derived from real fetched audit_logs data) */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
                 <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm space-y-1">
-                  <span className="text-[10px] font-mono text-slate-450 uppercase block">Notarized SLA Index</span>
-                  <div className="text-xl font-bold text-slate-900">99.85%</div>
-                  <span className="text-[10px] text-emerald-600 font-bold block">100% compliant state audit logs</span>
+                  <span className="text-[10px] font-mono text-slate-450 uppercase block">Audit events on record</span>
+                  <div className="text-xl font-bold text-slate-900">{displayAuditLogs.length}</div>
+                  <span className="text-[10px] text-slate-400 block">Most recent {displayAuditLogs.length} events shown below</span>
                 </div>
 
                 <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm space-y-1">
-                  <span className="text-[10px] font-mono text-slate-450 uppercase block">Regulatory compliance</span>
-                  <div className="text-lg font-bold text-emerald-600 flex items-center gap-1">
-                    <ShieldCheck className="w-5 h-5 text-emerald-500 shrink-0" />
-                    eIDAS CERTIFIED
+                  <span className="text-[10px] font-mono text-slate-450 uppercase block">Distinct action types</span>
+                  <div className="text-xl font-bold text-slate-900">{new Set(displayAuditLogs.map(l => l.action)).size}</div>
+                  <span className="text-[10px] text-slate-400 block">Across documents, employees, and queue</span>
+                </div>
+
+                <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm space-y-1">
+                  <span className="text-[10px] font-mono text-slate-450 uppercase block">Most recent activity</span>
+                  <div className="text-lg font-bold text-slate-900">
+                    {displayAuditLogs[0]?.created_at ? new Date(displayAuditLogs[0].created_at).toLocaleString() : "—"}
                   </div>
-                  <span className="text-[10px] text-slate-400 block">ESIGN Act standards active</span>
-                </div>
-
-                <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm space-y-1">
-                  <span className="text-[10px] font-mono text-slate-450 uppercase block">Active queue checks</span>
-                  <div className="text-xl font-bold text-slate-900">0 min delay</div>
-                  <span className="text-[10px] text-slate-400 block">Lobby sweep automated chimes active</span>
-                </div>
-
-                <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm space-y-1">
-                  <span className="text-[10px] font-mono text-slate-450 uppercase block">Stripe reconciliations</span>
-                  <div className="text-xl font-bold text-slate-900">Auto Payout</div>
-                  <span className="text-[10px] text-blue-600 font-bold block">Daily deposits reconciled</span>
+                  <span className="text-[10px] text-slate-400 block">{displayAuditLogs[0]?.action?.replace(/_/g, " ") ?? "No events yet"}</span>
                 </div>
 
               </div>
+
 
               {/* PDF/CSV ledger logs download triggers */}
               <div className="bg-white border border-slate-200 p-5 rounded-xl shadow-sm space-y-5">
@@ -1401,7 +1430,7 @@ export default function CompanyAdminPortal({
                     <p className="text-xs text-slate-550">Generate full audited logs representing client registrations, document watermarks, and payments</p>
                   </div>
                   <button
-                    onClick={handleCSVExportMock}
+                    onClick={handleCSVExport}
                     className="bg-slate-900 hover:bg-slate-950 text-white font-bold text-xs px-4 py-2.5 rounded-lg flex items-center gap-1.5 transition outline-none shadow-sm cursor-pointer"
                   >
                     <FileSpreadsheet className="w-4 h-4" /> Export CSV Spreadsheet

@@ -14,7 +14,8 @@ import { Branch, NotaryDocument } from "../types";
 import { appointmentsApi, toUiAppointment } from "../api/appointments.api";
 import { uploadsApi, toUiUploadedFile } from "../api/uploads.api";
 import { documentsApi } from "../api/documents.api";
-import { ApiException } from "../api/client";
+import { ApiException, getAccessToken } from "../api/client";
+import { authApi } from "../api/auth.api";
 
 function formatDocumentStatusLabel(status: string): string {
   return status.replace(/_/g, " ").replace(/-/g, " ");
@@ -89,10 +90,20 @@ export default function CustomerPortal({
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // Logged-in Customer info context
-  const [customerName, setCustomerName] = useState("Ahmed Ali");
-  const [customerPhone, setCustomerPhone] = useState("+252 61 555-0144");
-  const [customerEmail] = useState("ahmed.ali@example.com");
+  // Logged-in Customer info context — fetched from the real authenticated session
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
+
+  useEffect(() => {
+    authApi.me()
+      .then(res => {
+        setCustomerName(res.fullName);
+        setCustomerPhone(res.phone ?? "");
+        setCustomerEmail(res.email);
+      })
+      .catch(err => console.error("Failed to load current user:", err));
+  }, []);
   const [customerPassword, setCustomerPassword] = useState("••••••••••••");
   const [avatarUrl, setAvatarUrl] = useState("https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150");
 
@@ -258,36 +269,15 @@ export default function CustomerPortal({
   useEffect(() => { loadUploads(); }, [loadUploads]);
   const [isDragging, setIsDragging] = useState(false);
 
-  // Invoices list (Combines local with prop-driven)
-  const [localInvoices, setLocalInvoices] = useState<Invoice[]>([
-    {
-      id: "inv-21",
-      invoiceNumber: "INV-2026-00015",
-      customerName: "Ahmed Ali",
-      amount: 25.00,
-      dueDate: "2026-06-12",
-      status: "paid",
-      items: [{ description: "Power of Attorney Document Certification", price: 25.00 }]
-    },
-    {
-      id: "inv-22",
-      invoiceNumber: "INV-2026-00030",
-      customerName: "Ahmed Ali",
-      amount: 45.00,
-      dueDate: "2026-06-25",
-      status: "unpaid",
-      items: [{ description: "Affidavit & Digital Fingerprint Validation Surcharge", price: 45.00 }]
-    }
-  ]);
-
-  const allInvoices = [...invoices, ...localInvoices].filter(
-    (v, i, a) => a.findIndex(t => t.invoiceNumber === v.invoiceNumber) === i
-  );
+  // NOTE: There is no real invoicing/billing backend yet (no per-transaction
+  // fee schema, no payment gateway integration). Rather than fabricate
+  // invoice data, we show an honest "not available" state below.
+  const allInvoices: Invoice[] = invoices;
 
   // AI Assistant Chat state
   const [aiAssistantPrompt, setAiAssistantPrompt] = useState("");
   const [aiAssistantChats, setAiAssistantChats] = useState<{ sender: "user" | "ai"; text: string }[]>([
-    { sender: "ai", text: "Hello Ahmed Ali, I am your dedicated Veritas AI Assistant. Feel free to ask me questions like:\n- *'What documents do I need for power of attorney?'*\n- *'How much does affidavit service cost?'*\n- *'When is my appointment?'*\n- *'What is the status of my document?'*" }
+    { sender: "ai", text: "Hello! I'm your Veritas AI Assistant. Feel free to ask me questions like:\n- *'What documents do I need for power of attorney?'*\n- *'How much does affidavit service cost?'*\n- *'When is my appointment?'*\n- *'What is the status of my document?'*" }
   ]);
   const [aiAssistantLoading, setAiAssistantLoading] = useState(false);
 
@@ -441,11 +431,16 @@ export default function CustomerPortal({
     setAiAssistantLoading(true);
 
     try {
+      const token = getAccessToken();
       const response = await fetch("/api/gemini/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: "include",
         body: JSON.stringify({
-          messages: [{ role: "user", content: `As Ahmed Ali, I am asking a customer question: ${userPrompt}. Provide an answer focusing on power of attorney requirements, affidavit fees ($25 standard), or checking appointment slots.` }]
+          messages: [{ role: "user", content: `As a notary office customer assistant, answer this customer question: ${userPrompt}. Focus on power of attorney requirements, affidavit processes, or checking appointment slots. Do not invent specific prices or dates you weren't given.` }]
         })
       });
       const data = await response.json();
@@ -455,17 +450,25 @@ export default function CustomerPortal({
         throw new Error();
       }
     } catch {
-      // Local smart mock fallback resolving requested sample prompts
-      let fallbackText = "I have scanned the legal knowledge base. If you need details on our Bosaso branch, let me know.";
+      // Local fallback — uses only the customer's real, already-loaded data.
+      let fallbackText = "I couldn't reach the AI assistant just now. If you have a specific question about your appointments or documents, I can look at your account details directly.";
       const cleanPrompt = userPrompt.toLowerCase();
       if (cleanPrompt.includes("power of attorney") || cleanPrompt.includes("documents do i need")) {
-        fallbackText = "💼 **Power of Attorney Requirements**:\nTo certify a Durable Power of Attorney document, you must present:\n1. A valid national ID or passport.\n2. Contact particulars and address profiles for both the Principal (Grantor) and the Agent.\n3. Digital signature overlay.\n4. Biometric fingerprint scan to sign-off compliance.";
+        fallbackText = "💼 **Power of Attorney Requirements**:\nTo certify a Power of Attorney document, you'll typically need:\n1. A valid national ID or passport.\n2. Contact details for both the Principal (Grantor) and the Agent.\n3. A signature at the branch during your appointment.\nPlease check with branch staff for the exact fee for your document type.";
       } else if (cleanPrompt.includes("affidavit") || cleanPrompt.includes("how much") || cleanPrompt.includes("cost")) {
-        fallbackText = "💵 **Affidavit Service Costing**:\nStandard affidavit verification slots are charged at a flat desk fee of **$25.00 usd**. Optional biometrics captures or bulk certified printing spools can add a nominal fee, visible under the Payments checkout ledger.";
+        fallbackText = "💵 **Affidavit Service Costing**:\nI don't have live pricing data to share here — please check with branch staff or your checkout screen for the exact fee for your document type.";
       } else if (cleanPrompt.includes("appointment") || cleanPrompt.includes("when is")) {
-        fallbackText = "📅 **Your Active Booking Details**:\nYou have an upcoming appointment scheduled for **25 June 2026** at **10:00 AM** at our **Bosaso Main Branch** (Status: Confirmed). Please check into counter kiosk 15 minutes ahead of schedule!";
+        const upcoming = bookedAppointments
+          .filter(a => new Date(a.appointmentTime).getTime() > Date.now())
+          .sort((a, b) => new Date(a.appointmentTime).getTime() - new Date(b.appointmentTime).getTime())[0];
+        fallbackText = upcoming
+          ? `📅 **Your Next Appointment**:\nYou have an appointment scheduled for **${new Date(upcoming.appointmentTime).toLocaleString()}**. Please arrive a few minutes early.`
+          : "📅 **Appointments**:\nYou don't have any upcoming appointments booked right now. You can book one from the Appointments tab.";
       } else if (cleanPrompt.includes("status of my document") || cleanPrompt.includes("status")) {
-        fallbackText = "🔍 **Document Status Analytics**:\nYour recent *'Affidavit of Dual Residency Certification'* is currently **Under Review** by Clerk Elena Rostova. Your *'Power of Attorney'* is marked as **Completed** and is verified on the blockchain registry.";
+        const recent = allDocs[0];
+        fallbackText = recent
+          ? `🔍 **Document Status**:\nYour most recent document (**${recent.doc_type?.replace(/_/g, " ")}**) is currently **${recent.status}**.`
+          : "🔍 **Document Status**:\nYou don't have any documents on file yet.";
       }
       setAiAssistantChats(prev => [...prev, { sender: "ai", text: fallbackText }]);
     } finally {
@@ -1014,11 +1017,8 @@ export default function CustomerPortal({
                           </div>
                         ))}
                         {branches.length === 0 && (
-                          <div 
-                            onClick={() => { setBookingBranchId("br-mock"); setBookingStep(3); }}
-                            className="p-3 border border-slate-200 hover:bg-slate-50 cursor-pointer rounded-xl text-xs"
-                          >
-                            <span>Bosaso Main Branch (Federal District)</span>
+                          <div className="p-3 border border-dashed border-slate-200 rounded-xl text-xs text-slate-400 text-center">
+                            No branches are available to book right now. Please check back later.
                           </div>
                         )}
                       </div>
@@ -1542,54 +1542,40 @@ export default function CustomerPortal({
                 </div>
 
                 <div className="space-y-3 pt-1">
-                  {allInvoices.map(inv => (
-                    <div key={inv.id} className="p-4 bg-slate-50 hover:bg-slate-100/30 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs select-none">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-extrabold text-slate-950 font-sans tracking-tight block text-sm">{inv.invoiceNumber}</span>
-                          <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-sans font-bold uppercase ${
-                            inv.status === "paid" ? "bg-emerald-50 border border-emerald-100 text-emerald-700" : "bg-amber-50 border border-amber-200 text-amber-700"
-                          }`}>{inv.status}</span>
-                        </div>
-                        <p className="text-slate-500 mt-1 text-[11px] font-sans">Verification: Durable Power of Attorney certification</p>
-                        <p className="text-[9.5px] text-slate-400 font-mono mt-0.5">Issued Due: {inv.dueDate}</p>
-                      </div>
-
-                      <div className="flex items-center gap-4 text-xs font-mono justify-between sm:justify-end">
-                        <div className="text-right">
-                          <span className="text-[10px] text-slate-400 block uppercase font-sans">TOTAL DUE</span>
-                          <span className="text-slate-900 font-bold font-sans text-sm">${inv.amount.toFixed(2)}</span>
-                        </div>
-
-                        {inv.status === "unpaid" ? (
-                          <button
-                            onClick={() => {
-                              onPayInvoice(inv.id);
-                              // Sync state locally
-                              setLocalInvoices(prev => prev.map(i => i.id === inv.id ? { ...i, status: "paid" } : i));
-                              alert("💸 Simulated stripe payment successful! Settle receipt watermarked on your Veritas balance.");
-                            }}
-                            className="bg-emerald-600 hover:bg-emerald-550 text-white font-bold py-2 px-4 rounded-xl transition shadow-xs"
-                          >
-                            Pay Online (Stripe)
-                          </button>
-                        ) : (
-                          <div className="flex items-center gap-1">
-                            <button 
-                              onClick={() => alert(`Downloaded receipt for invoice transaction ${inv.invoiceNumber}.`)}
-                              className="bg-white border border-slate-200 hover:bg-slate-50 text-[10.5px] text-slate-700 font-bold px-2.5 py-1.5 rounded-md transition duration-150 inline-flex items-center gap-1 shadow-sm"
-                            >
-                              <Download className="w-3.5 h-3.5 text-slate-600" /> Receipt
-                            </button>
-                          </div>
-                        )}
-                      </div>
+                  {allInvoices.length === 0 ? (
+                    <div className="p-8 text-center text-xs text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                      Online billing isn't available yet. Please contact your branch for any outstanding fees.
                     </div>
-                  ))}
-                </div>
+                  ) : (
+                    allInvoices.map(inv => (
+                      <div key={inv.id} className="p-4 bg-slate-50 hover:bg-slate-100/30 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs select-none">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-extrabold text-slate-950 font-sans tracking-tight block text-sm">{inv.invoiceNumber}</span>
+                            <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-sans font-bold uppercase ${
+                              inv.status === "paid" ? "bg-emerald-50 border border-emerald-100 text-emerald-700" : "bg-amber-50 border border-amber-200 text-amber-700"
+                            }`}>{inv.status}</span>
+                          </div>
+                          <p className="text-[9.5px] text-slate-400 font-mono mt-0.5">Issued Due: {inv.dueDate}</p>
+                        </div>
 
-                <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-100 text-[10.5px] text-emerald-800 leading-relaxed italic text-center">
-                  🔐 Card processing services are compliant with PCI-DSS data safeguards and encrypted in compliance with SOC-2 guidelines.
+                        <div className="flex items-center gap-4 text-xs font-mono justify-between sm:justify-end">
+                          <div className="text-right">
+                            <span className="text-[10px] text-slate-400 block uppercase font-sans">TOTAL DUE</span>
+                            <span className="text-slate-900 font-bold font-sans text-sm">${inv.amount.toFixed(2)}</span>
+                          </div>
+                          {inv.status === "unpaid" && (
+                            <button
+                              onClick={() => onPayInvoice(inv.id)}
+                              className="bg-emerald-600 hover:bg-emerald-550 text-white font-bold py-2 px-4 rounded-xl transition shadow-xs"
+                            >
+                              Pay
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
 
