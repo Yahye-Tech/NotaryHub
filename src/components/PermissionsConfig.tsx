@@ -9,8 +9,7 @@ export type PermissionKey =
   | "VIEW_REPORTS" 
   | "CREATE_EMPLOYEE" 
   | "CREATE_BRANCH" 
-  | "MANAGE_SUBSCRIPTIONS" 
-  | "BYPASS_BIOMETRICS";
+  | "MANAGE_SUBSCRIPTIONS";
 
 export interface PermissionsMatrix {
   SUPER_ADMIN: Record<PermissionKey, boolean>;
@@ -36,12 +35,12 @@ export default function PermissionsConfig({ permissionsMatrix, onUpdatePermissio
     { key: "VIEW_REPORTS", title: "View Reports", description: "Grants access to company billing, employee KPI reviews, and branch performance statistics." },
     { key: "CREATE_EMPLOYEE", title: "Create Employee", description: "Enables onboarding, suspending, and editing role parameters for clerks." },
     { key: "CREATE_BRANCH", title: "Create Branch", description: "Allows establishing new physical and logical counter bureaus within the tenant domain." },
-    { key: "MANAGE_SUBSCRIPTIONS", title: "Manage Subscriptions", description: "Allows upgrading, downgrading, or settling Stripe recurring licenses." },
-    { key: "BYPASS_BIOMETRICS", title: "Bypass Biometrics", description: "Grants authority to sign documents without capturing physical fingerprint minutiae." }
+    { key: "MANAGE_SUBSCRIPTIONS", title: "Manage Subscriptions", description: "Allows upgrading, downgrading, or settling recurring subscription plans." }
   ];
 
   const handleToggle = (role: Role, permission: PermissionKey) => {
-    // Super Admins should not have critical permissions removed in the mock sandbox to prevent lockout
+    // SUPER_ADMIN must keep this in the preview matrix — not a real safety
+    // lock, since this screen has no effect on actual enforcement anyway.
     if (role === "SUPER_ADMIN" && permission === "MANAGE_SUBSCRIPTIONS") {
       alert("Role safety lock: SUPER_ADMIN must maintain subscription and license management access.");
       return;
@@ -63,16 +62,23 @@ export default function PermissionsConfig({ permissionsMatrix, onUpdatePermissio
         <div>
           <h3 className="text-sm font-sans font-semibold text-white flex items-center gap-1.5">
             <ShieldCheck className="w-4 h-4 text-indigo-400" />
-            Configurable RBAC Permissions Module
+            RBAC Permissions Preview
           </h3>
           <p className="text-xs text-slate-400 mt-1">
-            Toggle state permissions interactively across the five standard operator hierarchies to demonstrate dynamic access enforcement rules.
+            This shows the permission set each role is intended to have. Toggling here does not change access —
+            real enforcement is hardcoded in the backend's role hierarchy middleware.
           </p>
         </div>
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-950 border border-slate-850 rounded text-[10px] font-mono text-indigo-300">
-          <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
-          ACTIVE: SYSTEM-WIDE ACCESS CONTROL
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-950 border border-slate-850 rounded text-[10px] font-mono text-amber-300">
+          <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+          PREVIEW ONLY — NOT ENFORCED
         </div>
+      </div>
+
+      <div className="bg-amber-950/20 border border-amber-900/40 rounded-lg p-3 text-[11px] text-amber-200 leading-relaxed">
+        Dynamic, per-role permission management isn't built yet. Changing a toggle below only updates this screen's local state
+        — it has no effect on what any user can actually do. Real access control still comes from the fixed role hierarchy
+        (SUPER_ADMIN → COMPANY_ADMIN → BRANCH_ADMIN → EMPLOYEE → CUSTOMER) enforced server-side.
       </div>
 
       <div className="overflow-x-auto">
@@ -148,10 +154,11 @@ export default function PermissionsConfig({ permissionsMatrix, onUpdatePermissio
           ) : (
             <div>
               <span className="text-xs font-mono font-bold text-indigo-300 uppercase block tracking-wider">
-                RBAC PROTECTION AUDITING
+                RBAC REFERENCE
               </span>
               <p className="text-[11px] text-slate-400 mt-1 leading-normal">
-                Hover over any permission name to review its threat category. Disabling any switch immediately updates the active validation checks in any simulation portal for secure and real-time state enforcement.
+                Hover over any permission name to see what it's intended to control. Remember: toggles on this screen are a
+                preview only and don't change real backend enforcement.
               </p>
             </div>
           )}

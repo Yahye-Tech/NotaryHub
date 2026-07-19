@@ -123,7 +123,6 @@ export default function CompanyAdminPortal({
   const [complianceAuditLogs, setComplianceAuditLogs] = useState<AuditLogEntry[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
   const [automaticSms, setAutomaticSms] = useState(true);
-  const [identityChecks, setIdentityChecks] = useState(true);
 
   // Form states inside portal
   const [branchName, setBranchName] = useState("");
@@ -1552,23 +1551,6 @@ export default function CompanyAdminPortal({
                     </button>
                   </div>
 
-                  <div className="flex justify-between items-center py-1 border-t border-slate-150 pt-3">
-                    <div>
-                      <span className="font-bold block text-slate-855">Enforce National biometric validations</span>
-                      <p className="text-[10px] text-slate-450 mt-0.5">Reject signatures if fingerprint loop indices score below 90% match</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setIdentityChecks(!identityChecks)}
-                      className="outline-none"
-                    >
-                      {identityChecks ? (
-                        <ToggleRight className="w-8 h-8 text-blue-600 cursor-pointer" />
-                      ) : (
-                        <ToggleLeft className="w-8 h-8 text-slate-350 cursor-pointer" />
-                      )}
-                    </button>
-                  </div>
                 </div>
               </div>
 
@@ -1578,8 +1560,8 @@ export default function CompanyAdminPortal({
                   <div className="flex gap-2 items-center">
                     <ShieldAlert className="w-5 h-5 text-indigo-650" />
                     <div>
-                      <h4 className="text-sm font-sans font-bold text-slate-900">Control Role Permissions Matrix (RBAC)</h4>
-                      <p className="text-xs text-slate-500">Configure global permission tokens for specific roles in real-time</p>
+                      <h4 className="text-sm font-sans font-bold text-slate-900">Role Permissions Matrix (RBAC) — Preview Only</h4>
+                      <p className="text-xs text-slate-500">This is a preview of intended role permissions. It does not change real access — enforcement is fixed in the backend role hierarchy.</p>
                     </div>
                   </div>
 
@@ -1589,7 +1571,6 @@ export default function CompanyAdminPortal({
                         <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-mono uppercase tracking-wider text-slate-500">
                           <th className="p-3.5 font-bold">System Role</th>
                           <th className="p-3.5 font-bold text-center">Draft Document</th>
-                          <th className="p-3.5 font-bold text-center">Bypass Biometrics</th>
                           <th className="p-3.5 font-bold text-center">Onboard Staff Clerks</th>
                           <th className="p-3.5 font-bold text-center">View Reports</th>
                         </tr>
@@ -1608,20 +1589,6 @@ export default function CompanyAdminPortal({
                                   const updated = {
                                     ...permissionsMatrix,
                                     [role]: { ...permissionsMatrix[role], "CREATE_DOCUMENT": e.target.checked }
-                                  };
-                                  onUpdatePermissions(updated);
-                                }}
-                                className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
-                              />
-                            </td>
-                            <td className="p-3.5 text-center">
-                              <input 
-                                type="checkbox"
-                                checked={!!permissionsMatrix[role]?.["BYPASS_BIOMETRICS"]}
-                                onChange={(e) => {
-                                  const updated = {
-                                    ...permissionsMatrix,
-                                    [role]: { ...permissionsMatrix[role], "BYPASS_BIOMETRICS": e.target.checked }
                                   };
                                   onUpdatePermissions(updated);
                                 }}

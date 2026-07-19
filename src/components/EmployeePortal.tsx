@@ -78,7 +78,6 @@ interface EmployeePortalProps {
   onClearSignature: () => void;
   hasSignature: boolean;
   isAllowedCreateDoc: boolean;
-  isAllowedBypassBio: boolean;
   onLogout: () => void;
 }
 
@@ -119,7 +118,6 @@ export default function EmployeePortal({
   onClearSignature,
   hasSignature,
   isAllowedCreateDoc,
-  isAllowedBypassBio,
   onLogout
 }: EmployeePortalProps) {
   // Main Tab/Module selection

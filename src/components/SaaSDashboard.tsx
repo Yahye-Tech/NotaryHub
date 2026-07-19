@@ -356,11 +356,11 @@ export default function SaaSDashboard() {
   ]);
 
   const [permissionsMatrix, setPermissionsMatrix] = useState<PermissionsMatrix>({
-    SUPER_ADMIN:   { CREATE_DOCUMENT: true,  EDIT_DOCUMENT: true,  DELETE_DOCUMENT: true,  VIEW_REPORTS: true,  CREATE_EMPLOYEE: true,  CREATE_BRANCH: true,  MANAGE_SUBSCRIPTIONS: true,  BYPASS_BIOMETRICS: true  },
-    COMPANY_ADMIN: { CREATE_DOCUMENT: true,  EDIT_DOCUMENT: true,  DELETE_DOCUMENT: false, VIEW_REPORTS: true,  CREATE_EMPLOYEE: true,  CREATE_BRANCH: true,  MANAGE_SUBSCRIPTIONS: false, BYPASS_BIOMETRICS: false },
-    BRANCH_ADMIN:  { CREATE_DOCUMENT: true,  EDIT_DOCUMENT: true,  DELETE_DOCUMENT: false, VIEW_REPORTS: true,  CREATE_EMPLOYEE: false, CREATE_BRANCH: false, MANAGE_SUBSCRIPTIONS: false, BYPASS_BIOMETRICS: false },
-    EMPLOYEE:      { CREATE_DOCUMENT: true,  EDIT_DOCUMENT: true,  DELETE_DOCUMENT: false, VIEW_REPORTS: false, CREATE_EMPLOYEE: false, CREATE_BRANCH: false, MANAGE_SUBSCRIPTIONS: false, BYPASS_BIOMETRICS: false },
-    CUSTOMER:      { CREATE_DOCUMENT: false, EDIT_DOCUMENT: false, DELETE_DOCUMENT: false, VIEW_REPORTS: false, CREATE_EMPLOYEE: false, CREATE_BRANCH: false, MANAGE_SUBSCRIPTIONS: false, BYPASS_BIOMETRICS: false },
+    SUPER_ADMIN:   { CREATE_DOCUMENT: true,  EDIT_DOCUMENT: true,  DELETE_DOCUMENT: true,  VIEW_REPORTS: true,  CREATE_EMPLOYEE: true,  CREATE_BRANCH: true, MANAGE_SUBSCRIPTIONS: true },
+    COMPANY_ADMIN: { CREATE_DOCUMENT: true,  EDIT_DOCUMENT: true,  DELETE_DOCUMENT: false, VIEW_REPORTS: true,  CREATE_EMPLOYEE: true,  CREATE_BRANCH: true, MANAGE_SUBSCRIPTIONS: false },
+    BRANCH_ADMIN:  { CREATE_DOCUMENT: true,  EDIT_DOCUMENT: true,  DELETE_DOCUMENT: false, VIEW_REPORTS: true,  CREATE_EMPLOYEE: false, CREATE_BRANCH: false, MANAGE_SUBSCRIPTIONS: false },
+    EMPLOYEE:      { CREATE_DOCUMENT: true,  EDIT_DOCUMENT: true,  DELETE_DOCUMENT: false, VIEW_REPORTS: false, CREATE_EMPLOYEE: false, CREATE_BRANCH: false, MANAGE_SUBSCRIPTIONS: false },
+    CUSTOMER:      { CREATE_DOCUMENT: false, EDIT_DOCUMENT: false, DELETE_DOCUMENT: false, VIEW_REPORTS: false, CREATE_EMPLOYEE: false, CREATE_BRANCH: false, MANAGE_SUBSCRIPTIONS: false },
   });
 
   // ── Load data when user logs in ───────────────────────────────────────────
@@ -823,7 +823,6 @@ export default function SaaSDashboard() {
             onClearSignature={() => {}}
             hasSignature={false}
             isAllowedCreateDoc={permissionsMatrix.EMPLOYEE?.CREATE_DOCUMENT}
-            isAllowedBypassBio={permissionsMatrix.EMPLOYEE?.BYPASS_BIOMETRICS}
             onLogout={handleLogout}
           />
         );
