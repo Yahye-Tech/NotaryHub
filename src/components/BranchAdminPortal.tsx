@@ -8,9 +8,11 @@ import {
   FileSpreadsheet, ClipboardList, RefreshCw, Star, Coins, Download, Settings, ChevronRight, X, Phone, Mail, Sliders, Menu, Sun, Moon
 } from "lucide-react";
 import { Branch, Employee, QueueTicket, NotaryDocument, Customer } from "../types";
-import { documentsApi, customersApi } from "../api/documents.api";
+import { documentsApi, customersApi, CustomerDocumentHistoryItem, CustomerActivityItem } from "../api/documents.api";
 import { appointmentsApi, formatAppointmentDisplayTime } from "../api/appointments.api";
 import { queueApi } from "../api/queue.api";
+import { analyticsApi, BranchReport } from "../api/analytics.api";
+import { auditApi, AuditLogEntry } from "../api/settings.api";
 import { getAccessToken, ApiException } from "../api/client";
 
 interface BranchAdminPortalProps {
@@ -185,14 +187,19 @@ export default function BranchAdminPortal({
 
   // Reports downloader state
   const [selectedReportType, setSelectedReportType] = useState<"daily" | "weekly" | "monthly" | "employee" | "document" | "revenue">("daily");
-  const [generatedReportPreview, setGeneratedReportPreview] = useState<string | null>(null);
+  const [generatedReport, setGeneratedReport] = useState<BranchReport | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
 
-  // Biometrics audits counters
-  const [auditLogs, setAuditLogs] = useState([
-    { time: "08:22 AM", action: "Fingerprint Scan", status: "matching_success", entity: "Warsame Farah", operator: "Elena Rostova" },
-    { time: "09:01 AM", action: "Digital Signature Lock", status: "matching_success", entity: "Ahmed Ali", operator: "Ahmed Farah" },
-    { time: "09:12 AM", action: "National ID OCR Verify", status: "matching_success", entity: "Elena Ahmed", operator: "Elena Rostova" }
-  ]);
+  // Real branch audit log (replaces the old fake biometrics simulator)
+  const [branchAuditLogs, setBranchAuditLogs] = useState<AuditLogEntry[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+
+  // Real customer history (documents + activity), fetched when a customer is opened
+  const [customerHistory, setCustomerHistory] = useState<{
+    documents: CustomerDocumentHistoryItem[];
+    activity: CustomerActivityItem[];
+  } | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   // Triggering visual paging toast chime
   const pageChime = (text: string) => {
@@ -407,23 +414,42 @@ export default function BranchAdminPortal({
     }
   };
 
-  // Fingerprint and signature mock triggers
-  const executeFingerprintMatchAudit = (customer_name: string) => {
-    const isMatched = Math.random() > 0.05; // 95% verification success simulation
-    if (isMatched) {
-      setAuditLogs(prev => [
-        { time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), action: "Live Fingerprint Matching", status: "matching_success", entity: customer_name, operator: "Elena Rostova" },
-        ...prev
-      ]);
-      alert(`✓ BIOMETRICS REGISTERED: Fingerprint template matches the Somalian Federal Trust identity database for ${customer_name}.`);
-    } else {
-      setAuditLogs(prev => [
-        { time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), action: "Live Fingerprint Matching", status: "matching_failure", entity: customer_name, operator: "Elena Rostova" },
-        ...prev
-      ]);
-      alert(`⚠️ ERROR: Biometrics validation mismatch. Please clean reader and retry.`);
+  // Real branch audit log — replaces the old fake biometrics simulator
+  const loadBranchAuditLogs = async () => {
+    if (!branchId) return;
+    setAuditLoading(true);
+    try {
+      const res = await auditApi.list({ branchId, limit: 30 });
+      setBranchAuditLogs(res.logs);
+    } catch (err) {
+      console.error("Failed to load audit logs:", err);
+    } finally {
+      setAuditLoading(false);
     }
   };
+
+  // Real customer document history + activity trail
+  const openCustomerDetail = async (cust: AdminCustomer) => {
+    setSelectedCustomer(cust);
+    setCustomerHistory(null);
+    setHistoryLoading(true);
+    try {
+      const res = await customersApi.history(cust.id);
+      setCustomerHistory({ documents: res.documents, activity: res.activity });
+    } catch (err) {
+      console.error("Failed to load customer history:", err);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  // Load the real audit log whenever the Audit Log tab is opened
+  useEffect(() => {
+    if (activeTab === "fingerprints") {
+      loadBranchAuditLogs();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, branchId]);
 
   // AI assistant — uses Gemini API with local branch context fallbacks
   const handleAISubmit = async (e: React.FormEvent) => {
@@ -457,47 +483,138 @@ export default function BranchAdminPortal({
     }
     
     if (lower.includes("employee") && (lower.includes("most") || lower.includes("highest") || lower.includes("processed"))) {
-      reply = "📊 **Top Employee Performance Audit**:\nOfficer **Ahmed Farah** has finalized **45 documents** and served **30 customers** this week, maintaining an average processing duration of **12 minutes per file**.";
+      try {
+        const empReport = await analyticsApi.branchReport({ branchId, type: "employee", period: "weekly" });
+        if (empReport.type === "employee" && empReport.employees.length > 0) {
+          const top = empReport.employees[0];
+          reply = `📊 **Top Employee Performance (${empReport.periodLabel})**:\n**${top.name}** (${top.jobRole}) processed **${top.documentsProcessed} documents** and served **${top.ticketsServed} tickets**` +
+            (top.avgProcessingMinutes != null ? `, averaging **${top.avgProcessingMinutes} min** per ticket.` : ".");
+        } else {
+          reply = "📊 No employee activity has been recorded for this branch in the last 7 days yet.";
+        }
+      } catch {
+        reply = "I couldn't load employee performance data right now — please try the Reports tab instead.";
+      }
     } else if (lower.includes("pending") && lower.includes("document")) {
       const pendingCount = localDocs.filter(d => !["notarised", "revoked"].includes(d.status)).length;
       reply = `📂 **Pending Documents Audit**:\nThere are currently **${pendingCount} pending documents** awaiting notarisation in this branch.`;
     } else if (lower.includes("busiest") || lower.includes("day")) {
-      reply = "📅 **Incoming Velocity Analytics**:\nBased on active booking metadata, the busiest day this month was **Wednesday, 2026-06-10** with 34 active check-ins and 18 queued walking clients.";
+      try {
+        const weekly = await analyticsApi.branchReport({ branchId, type: "weekly" });
+        if (weekly.type === "weekly") {
+          reply = `📅 **Weekly Activity**:\nOver the last 7 days this branch processed **${weekly.documentsProcessed} documents** and completed **${weekly.queueCompleted} queue tickets**. A per-day breakdown isn't available yet — this is the aggregate for the period.`;
+        }
+      } catch {
+        reply = "I couldn't load weekly activity data right now — please try the Reports tab instead.";
+      }
     } else if (lower.includes("report") || lower.includes("generate")) {
-      reply = "📑 **System Report Generated Successfully**:\nI have drafted the Weekly Branch Summary for **Bosaso Main Branch**.\n- Customers Checked In: 184\n- Sealing Success Rate: 98.4%\n- Cumulative Revenue: $4,600\n- Click the 'Reports' sidebar option to export the PDF version!";
+      try {
+        const weekly = await analyticsApi.branchReport({ branchId, type: "weekly" });
+        if (weekly.type === "weekly") {
+          reply = `📑 **Weekly Branch Summary**:\n- Documents processed: ${weekly.documentsProcessed}\n- Documents notarised: ${weekly.documentsNotarised}\n- Queue tickets completed: ${weekly.queueCompleted}\n- Currently waiting: ${weekly.queueWaitingNow}\nOpen the 'Reports' tab to export this as PDF or CSV.`;
+        }
+      } catch {
+        reply = "I couldn't generate the report right now — please try the Reports tab instead.";
+      }
     }
 
     setAiHistory(prev => [...prev, { sender: "ai", msg: reply }]);
   };
 
-  // Reports downloader simulation
-  const handleTriggerReportGeneration = () => {
-    let reportDesc = "";
-    switch (selectedReportType) {
-      case "daily":
-        reportDesc = `VERITAS REPORT SYSTEM\n====================\nDocument Date: 2026-06-12\nBranch: Bosaso Main Office\n\n- Customers Served: 34\n- Total Sealed Deeds: 22\n- Outstanding Queue Waiting: 7\n- Daily Ledger Capital: $850 usd\n- Clerk Audit SLA: compliant (avg. 6.8min)`;
-        break;
-      case "weekly":
-        reportDesc = `VERITAS REPORT SYSTEM\n====================\nService Cycle: 2026-06-06 to 2026-06-12\nBranch: Bosaso Main Office\n\n- Total Registered Walk-ins: 245\n- Approved Power of Attorney Contracts: 92\n- Draft Documents Flagged: 15\n- Cleared Billings: $2,450 usd\n- Customer Sat Score: 98% (Exceeding Targets)`;
-        break;
-      case "monthly":
-        reportDesc = `VERITAS REPORT SYSTEM\n====================\nTarget Period: June 2026\nBranch: Bosaso Main Office\n\n- Total Client Registry: 982 Users\n- Completed Signature Watermarks: 412\n- Dispatched Escrows: 390\n- Total Revenue Calculated: $10,300 usd\n- System Status: Fully Operational`;
-        break;
-      case "employee":
-        reportDesc = `VERITAS REPORT SYSTEM\n====================\nEmployee Productivity Review\n\n- Ahmed Farah: 45 Processed, 12 min avg speed\n- Elena Rostova: 30 Processed (Audit Intensive), 18 min avg speed\n- Warsame Duale: 28 Processed, 15 min avg speed\n- Fathia Omar: Counter Frontdesk, 110 ticketing slots managed`;
-        break;
-      case "document":
-        reportDesc = `VERITAS REPORT SYSTEM\n====================\nDocument Ledger Audit Logs\n\n- Completed Watermarks: 5\n- Pending Fingerprints: 3\n- Archived Contracts: 2\n- Encrypted IPFS Hashes verified: checked`;
-        break;
-      case "revenue":
-        reportDesc = `VERITAS REPORT SYSTEM\n====================\nRevenue Streams & Cashier Desk logs\n\n- POA Flat checkout ($25): $450\n- Multi-Signature validation: $250\n- Fasttrack Priority fees: $150\n- Cumulative Branch Cash flow today: $850 usd`;
-        break;
+  // Fetch real branch report data from the backend
+  const handleTriggerReportGeneration = async () => {
+    setReportLoading(true);
+    setGeneratedReport(null);
+    try {
+      const params: { branchId?: string; type: string; period?: string } = {
+        branchId,
+        type: selectedReportType,
+      };
+      if (selectedReportType === "employee") params.period = "weekly";
+      const report = await analyticsApi.branchReport(params);
+      setGeneratedReport(report);
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to generate report.");
+    } finally {
+      setReportLoading(false);
     }
-    setGeneratedReportPreview(reportDesc);
   };
 
-  const executeFakeExport = (format: "pdf" | "excel") => {
-    alert(`📥 Exporting Report to ${format === "pdf" ? "PDF format Document" : "Excel Sheet Spreadsheet"}...\nYour browser file download was initialized successfully. (${selectedReportType}_report_${Date.now()}.${format === "pdf" ? "pdf" : "xlsx"})`);
+  // Build plain-text lines from the real report data (shared by preview, CSV, and PDF export)
+  const reportToLines = (report: BranchReport): string[] => {
+    const lines: string[] = [`NotaryHub Branch Report — ${branchName ?? "Branch"}`];
+    if (report.type === "employee") {
+      lines.push(`Employee productivity — ${report.periodLabel}`);
+      lines.push("");
+      report.employees.forEach(e => {
+        lines.push(`${e.name} (${e.jobRole}) — ${e.documentsProcessed} documents, ${e.ticketsServed} tickets served` +
+          (e.avgProcessingMinutes != null ? `, avg ${e.avgProcessingMinutes} min` : ""));
+      });
+    } else if (report.type === "document") {
+      lines.push("Document ledger");
+      lines.push("");
+      lines.push(`Total: ${report.totals.total}`);
+      lines.push(`Notarised: ${report.totals.notarised}`);
+      lines.push(`Pending: ${report.totals.pending}`);
+      lines.push(`Rejected/Revoked/Expired: ${report.totals.rejected}`);
+      lines.push("");
+      report.byStatus.forEach(s => lines.push(`${s.status}: ${s.count}`));
+    } else if (report.type === "revenue") {
+      lines.push("Revenue");
+      lines.push("");
+      lines.push(report.message);
+      lines.push(`Company-level MRR: $${report.tenantMrrDollars}`);
+    } else {
+      lines.push(`${report.periodLabel}`);
+      lines.push("");
+      lines.push(`Documents processed: ${report.documentsProcessed}`);
+      lines.push(`Documents notarised: ${report.documentsNotarised}`);
+      lines.push(`Customers served: ${report.customersServedDocs}`);
+      lines.push(`Queue tickets completed: ${report.queueCompleted}`);
+      lines.push(`Currently waiting in queue: ${report.queueWaitingNow}`);
+      lines.push(`Avg processing time: ${report.avgProcessingMinutes != null ? report.avgProcessingMinutes + " min" : "n/a"}`);
+    }
+    return lines;
+  };
+
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportReport = async (format: "pdf" | "excel") => {
+    if (!generatedReport) {
+      alert("Generate a report preview first.");
+      return;
+    }
+    const lines = reportToLines(generatedReport);
+    const filenameBase = `${selectedReportType}_report_${Date.now()}`;
+
+    if (format === "excel") {
+      const csv = lines.map(l => `"${l.replace(/"/g, '""')}"`).join("\n");
+      downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8;" }), `${filenameBase}.csv`);
+      return;
+    }
+
+    const { jsPDF } = await import("jspdf");
+    const doc = new jsPDF();
+    doc.setFontSize(11);
+    let y = 15;
+    lines.forEach(line => {
+      const wrapped = doc.splitTextToSize(line, 180);
+      wrapped.forEach((w: string) => {
+        if (y > 280) { doc.addPage(); y = 15; }
+        doc.text(w, 15, y);
+        y += 7;
+      });
+    });
+    doc.save(`${filenameBase}.pdf`);
   };
 
   // Safe checks for arrays
@@ -701,7 +818,7 @@ export default function BranchAdminPortal({
                 activeTab === "fingerprints" ? "bg-slate-100 text-slate-900 font-extrabold border-l-4 border-blue-600 rounded-l-none" : "text-slate-600 hover:bg-slate-50"
               }`}
             >
-              <Shield className="w-3.5 h-3.5" /> Biometrics Hub
+              <Shield className="w-3.5 h-3.5" /> Audit Log
             </button>
 
             <button
@@ -1608,7 +1725,7 @@ export default function BranchAdminPortal({
                         
                         <div className="flex gap-1.5">
                           <button 
-                            onClick={() => setSelectedCustomer(cust)}
+                            onClick={() => openCustomerDetail(cust)}
                             className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold p-1.5 px-3 rounded-lg text-[11px] transition"
                           >
                             View Record History
@@ -1631,28 +1748,45 @@ export default function BranchAdminPortal({
                           <span className="text-[9px] text-slate-400 font-mono block">CLIENT SESSION AUDIT HISTORIES</span>
                           <h4 className="text-base font-extrabold text-slate-900 leading-tight">{selectedCustomer.name}</h4>
                         </div>
-                        <button onClick={() => setSelectedCustomer(null)} className="text-slate-400 hover:text-slate-650">
+                        <button onClick={() => { setSelectedCustomer(null); setCustomerHistory(null); }} className="text-slate-400 hover:text-slate-650">
                           <X className="w-4 h-4" />
                         </button>
                       </div>
 
                       <div className="space-y-2.5 text-xs text-slate-700">
                         <div>
-                          <span className="text-[10px] text-slate-400 font-mono block">REGISTERED BIOMETRICS KEY</span>
-                          <p className="font-bold text-emerald-700 mt-0.5">Dual Hand Fingerprint Verified ✓</p>
-                        </div>
-
-                        <div>
                           <span className="text-[10px] text-slate-400 font-mono block uppercase">National Clearance ID</span>
                           <p className="font-bold text-slate-800">{selectedCustomer.nationalId}</p>
                         </div>
 
                         <div className="space-y-1.5">
-                          <span className="text-[10px] text-slate-400 font-mono block uppercase">Transaction log records</span>
+                          <span className="text-[10px] text-slate-400 font-mono block uppercase">Document history</span>
                           <div className="space-y-1.5 font-sans">
-                            {selectedCustomer.historyLogs.map((log, idx) => (
+                            {historyLoading && (
+                              <p className="text-[11px] text-slate-400 italic">Loading history…</p>
+                            )}
+                            {!historyLoading && customerHistory?.documents.length === 0 && (
+                              <p className="text-[11px] text-slate-400 italic">No documents on record.</p>
+                            )}
+                            {customerHistory?.documents.map((doc, idx) => (
                               <div key={idx} className="p-2 bg-slate-50 border border-slate-100 rounded-lg text-[11px]">
-                                {log}
+                                <span className="font-bold">{doc.document_number}</span> — {doc.doc_type.replace(/_/g, " ")} · {doc.status}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <span className="text-[10px] text-slate-400 font-mono block uppercase">Activity trail</span>
+                          <div className="space-y-1.5 font-sans">
+                            {!historyLoading && customerHistory?.activity.length === 0 && (
+                              <p className="text-[11px] text-slate-400 italic">No activity recorded.</p>
+                            )}
+                            {customerHistory?.activity.map((log, idx) => (
+                              <div key={idx} className="p-2 bg-slate-50 border border-slate-100 rounded-lg text-[11px]">
+                                {log.action.replace(/_/g, " ")} {log.resource_label ? `— ${log.resource_label}` : ""}
+                                {log.actor_name ? ` · by ${log.actor_name}` : ""}
+                                <span className="block text-slate-400">{new Date(log.created_at).toLocaleString()}</span>
                               </div>
                             ))}
                           </div>
@@ -1661,7 +1795,7 @@ export default function BranchAdminPortal({
 
                       <div className="flex justify-end pt-2">
                         <button 
-                          onClick={() => setSelectedCustomer(null)}
+                          onClick={() => { setSelectedCustomer(null); setCustomerHistory(null); }}
                           className="bg-slate-900 text-white font-extrabold py-2 px-4 rounded-xl text-xs"
                         >
                           Close Record Directory
@@ -1674,93 +1808,46 @@ export default function BranchAdminPortal({
             </div>
           )}
 
-          {/* SCREEN 7: BIOMETRICS HUB */}
+          {/* SCREEN 7: AUDIT LOG (real data — replaces the old fake biometrics simulator) */}
           {activeTab === "fingerprints" && (
             <div className="space-y-6 animate-fadeIn" id="branch-biometrics-panel">
               <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs space-y-4">
-                <div>
-                  <span className="text-xs font-mono text-slate-500 uppercase font-black block">Fingerprint & Signature Verification Center</span>
-                  <p className="text-xs text-slate-500 mt-0.5">E-Verify with digital handwriting matching, dual fingerprints matching, and security audit logs.</p>
+                <div className="flex justify-between items-center">
+                  <div>
+                    <span className="text-xs font-mono text-slate-500 uppercase font-black block">Branch Audit Log</span>
+                    <p className="text-xs text-slate-500 mt-0.5">Real operational activity for this branch — document, employee, and queue actions.</p>
+                  </div>
+                  <button
+                    onClick={loadBranchAuditLogs}
+                    className="bg-white border border-slate-250 hover:bg-slate-50 text-slate-700 text-xs font-semibold px-3 py-2 rounded-xl transition flex items-center gap-1.5"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" /> Refresh
+                  </button>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  
-                  {/* Fingerprint capture match tester */}
-                  <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-4 text-xs font-sans">
-                    <span className="font-bold text-slate-900 block">Deploy Fingerprint Validator Matcher</span>
-                    
-                    <div className="p-4 bg-white border border-slate-200 rounded-xl space-y-3.5 text-center">
-                      <FingerprintIcon className="w-12 h-12 text-indigo-700 mx-auto animate-pulse" />
+                <div className="space-y-1.5 max-h-[480px] overflow-y-auto">
+                  {auditLoading && (
+                    <p className="text-xs text-slate-400 italic text-center py-6">Loading audit log…</p>
+                  )}
+                  {!auditLoading && branchAuditLogs.length === 0 && (
+                    <p className="text-xs text-slate-400 italic text-center py-6">No audit events recorded yet for this branch.</p>
+                  )}
+                  {branchAuditLogs.map((log) => (
+                    <div key={log.id} className="p-2.5 bg-slate-50 border border-slate-150 rounded-lg flex items-center justify-between text-xs font-mono">
                       <div>
-                        <span className="text-[10px] text-slate-400 font-mono block uppercase">Biometric matched scan status</span>
-                        <p className="text-[11px] text-slate-650 leading-relaxed max-w-xs mx-auto">Please select a registered active guest to scan fingerprint matching records against federal escrows.</p>
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="block text-[10px] text-slate-500 font-mono uppercase text-left">Select active target</label>
-                        <div className="flex gap-2">
-                          <select id="fingerprint-scan-select" className="bg-slate-50 text-xs border border-slate-250 p-2 rounded-lg flex-1 font-semibold">
-                            {customers.map(c => (
-                              <option key={c.id} value={c.name}>{c.name}</option>
-                            ))}
-                          </select>
-                          <button 
-                            onClick={() => {
-                              const el = document.getElementById("fingerprint-scan-select") as HTMLSelectElement;
-                              if (el) executeFingerprintMatchAudit(el.value);
-                            }}
-                            className="bg-indigo-600 hover:bg-indigo-500 text-white font-sans font-bold px-3 py-2 rounded-lg text-xs"
-                          >
-                            Verify Fingerprint
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Handwriting signature validation matcher */}
-                  <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-4 text-xs font-sans">
-                    <span className="font-bold text-slate-900 block">Deploy digital signature auditor</span>
-                    
-                    <div className="p-4 bg-white border border-slate-200 rounded-xl space-y-3.5 text-center">
-                      <div className="w-12 h-12 rounded-full bg-indigo-50 flex items-center justify-center font-bold text-indigo-700 text-xl mx-auto">✍️</div>
-                      <div>
-                        <span className="text-[10px] text-slate-400 font-mono block uppercase">Digital signature overlays validation</span>
-                        <p className="text-[11px] text-slate-650 leading-relaxed max-w-xs mx-auto">Analyze client digital stroke structures using multi-axis vector models.</p>
-                      </div>
-
-                      <button 
-                        onClick={() => {
-                          alert("✓ DIGITAL SIGNATURE VERIFIED: Vector analysis shows 98.7% similarity. Identity matching certificates issued.");
-                        }}
-                        className="bg-slate-900 hover:bg-slate-800 text-white font-sans font-bold py-2 px-4 rounded-xl text-xs w-full block transition"
-                      >
-                        Verify Signatures Strokes Matching
-                      </button>
-                    </div>
-                  </div>
-
-                </div>
-
-                {/* Audit trail list logs */}
-                <div className="space-y-3">
-                  <span className="font-bold text-slate-800 block text-xs uppercase font-mono">Fingerprints & Hand Signature Audit Logs Logs</span>
-                  
-                  <div className="space-y-1.5 max-h-[220px] overflow-y-auto">
-                    {auditLogs.map((log, idx) => (
-                      <div key={idx} className="p-2.5 bg-slate-50 border border-slate-150 rounded-lg flex items-center justify-between text-xs font-mono">
-                        <div>
-                          <span className="text-[9px] text-slate-400 block">{log.time} • Operator Index: Clerk Elena</span>
-                          <span className="font-bold text-slate-800 font-sans block">{log.entity} • Matching type: {log.action}</span>
-                        </div>
-                        <span className="text-emerald-700 font-bold text-[10px] bg-emerald-50 border border-emerald-200 px-2 rounded-full">
-                          MATCHING COMPLIANT ✓
+                        <span className="text-[9px] text-slate-400 block">
+                          {new Date(log.created_at).toLocaleString()} {log.actor_name ? `• by ${log.actor_name}` : ""}
+                        </span>
+                        <span className="font-bold text-slate-800 font-sans block">
+                          {log.action.replace(/_/g, " ")}{log.resource_label ? ` — ${log.resource_label}` : ""}
                         </span>
                       </div>
-                    ))}
-                  </div>
+                      <span className="text-slate-600 font-bold text-[10px] bg-slate-100 border border-slate-200 px-2 rounded-full">
+                        {log.resource_type ?? "system"}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-
               </div>
             </div>
           )}
@@ -1793,20 +1880,21 @@ export default function BranchAdminPortal({
 
                   <button 
                     onClick={handleTriggerReportGeneration}
-                    className="bg-indigo-600 hover:bg-indigo-500 text-white font-sans font-bold text-xs p-2 h-[38px] rounded-xl transition text-center block w-full shadow-xs"
+                    disabled={reportLoading}
+                    className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-sans font-bold text-xs p-2 h-[38px] rounded-xl transition text-center block w-full shadow-xs"
                   >
-                    Draft Preview Log
+                    {reportLoading ? "Generating…" : "Draft Preview Log"}
                   </button>
 
                   <div className="grid grid-cols-2 gap-2 h-[38px]">
                     <button 
-                      onClick={() => executeFakeExport("pdf")}
+                      onClick={() => handleExportReport("pdf")}
                       className="bg-white border border-slate-250 hover:bg-slate-50 text-slate-705 text-xs font-semibold p-1 px-3.5 rounded-xl transition flex justify-center items-center gap-1 shadow-xs"
                     >
                       <Download className="w-3.5 h-3.5" /> PDF
                     </button>
                     <button 
-                      onClick={() => executeFakeExport("excel")}
+                      onClick={() => handleExportReport("excel")}
                       className="bg-white border border-slate-250 hover:bg-slate-50 text-slate-705 text-xs font-semibold p-1 px-3.5 rounded-xl transition flex justify-center items-center gap-1 shadow-xs"
                     >
                       <Download className="w-3.5 h-3.5" /> Excel
@@ -1815,16 +1903,16 @@ export default function BranchAdminPortal({
                 </div>
 
                 {/* Previews panel */}
-                {generatedReportPreview ? (
+                {generatedReport ? (
                   <div className="space-y-2">
-                    <span className="text-[10px] text-slate-400 font-mono block uppercase">Secure Report Layout Draft Preview</span>
-                    <pre className="p-4 bg-slate-950 text-sky-400 font-mono text-[10.5px] rounded-xl overflow-x-auto leading-relaxed border border-indigo-950/40">
-                      {generatedReportPreview}
+                    <span className="text-[10px] text-slate-400 font-mono block uppercase">Report Preview</span>
+                    <pre className="p-4 bg-slate-950 text-sky-400 font-mono text-[10.5px] rounded-xl overflow-x-auto leading-relaxed border border-indigo-950/40 whitespace-pre-wrap">
+                      {reportToLines(generatedReport).join("\n")}
                     </pre>
                   </div>
                 ) : (
                   <div className="p-8 text-center text-xs text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                    Please select a target report and click 'Draft Preview Log' to display layout.
+                    {reportLoading ? "Generating report…" : "Please select a target report and click 'Draft Preview Log' to display layout."}
                   </div>
                 )}
               </div>
@@ -2016,31 +2104,4 @@ function Volume2Icon(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
-function FingerprintIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...props}
-    >
-      <path d="M12 22v-3" />
-      <path d="M12 14v4" />
-      <path d="M14 18v1" />
-      <path d="M14 11v1" />
-      <path d="M10 18v2" />
-      <path d="M10 10v1" />
-      <path d="M8 14v4" />
-      <path d="M8 9a4 4 0 0 1 8 0v3" />
-      <path d="M16 14v2" />
-      <path d="M6 14v2a6 6 0 0 1 12 0v-4h1" />
-      <path d="M4 14a8 8 0 0 1 15-3" />
-    </svg>
-  );
-}
+

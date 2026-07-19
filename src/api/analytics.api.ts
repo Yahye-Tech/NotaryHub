@@ -95,6 +95,51 @@ export interface OverviewData {
   revenue:   { mrrDollars: number };
 }
 
+// ─── Branch Report (Branch Admin Portal "Reports" panel) ─────────────────────
+export interface BranchPeriodReport {
+  type: "daily" | "weekly" | "monthly";
+  periodLabel: string;
+  documentsProcessed: number;
+  documentsNotarised: number;
+  customersServedDocs: number;
+  queueCompleted: number;
+  queueWaitingNow: number;
+  avgProcessingMinutes: number | null;
+}
+
+export interface BranchEmployeeReport {
+  type: "employee";
+  periodLabel: string;
+  employees: {
+    employeeId: string;
+    name: string;
+    jobRole: string;
+    assignedCounter: number | null;
+    documentsProcessed: number;
+    ticketsServed: number;
+    avgProcessingMinutes: number | null;
+  }[];
+}
+
+export interface BranchDocumentReport {
+  type: "document";
+  byStatus: { status: string; count: number }[];
+  totals: { total: number; notarised: number; pending: number; rejected: number };
+}
+
+export interface BranchRevenueReport {
+  type: "revenue";
+  branchRevenueAvailable: false;
+  message: string;
+  tenantMrrDollars: number;
+}
+
+export type BranchReport =
+  | BranchPeriodReport
+  | BranchEmployeeReport
+  | BranchDocumentReport
+  | BranchRevenueReport;
+
 // ─── API calls ────────────────────────────────────────────────────────────────
 export const analyticsApi = {
   overview:       () => api.get<OverviewData>("/api/analytics/overview"),
@@ -103,4 +148,11 @@ export const analyticsApi = {
   documents:      () => api.get<DocumentStatsData>("/api/analytics/documents"),
   subscriptions:  () => api.get<SubscriptionData>("/api/analytics/subscriptions"),
   branches:       () => api.get<BranchPerformanceData>("/api/analytics/branches"),
+  branchReport:   (params: { branchId?: string; type: string; period?: string }) => {
+    const qs = Object.entries(params)
+      .filter(([, v]) => v !== undefined)
+      .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
+      .join("&");
+    return api.get<BranchReport>(`/api/analytics/branch-report?${qs}`);
+  },
 };

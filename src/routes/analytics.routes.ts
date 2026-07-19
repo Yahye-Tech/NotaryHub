@@ -4,6 +4,38 @@ import { query } from "../db/pool.js";
 
 const router = Router();
 
+// ─── Resolve the caller's own branch (for BRANCH_ADMIN / EMPLOYEE) ────────────
+// Mirrors the pattern used in queue.routes.ts: explicit branchId wins for
+// COMPANY_ADMIN+, otherwise falls back to the employee's own branch record.
+async function resolveOwnBranchId(userId: string): Promise<string | null> {
+  const { rows } = await query<{ branch_id: string }>(
+    `SELECT branch_id FROM employees WHERE user_id = $1 AND is_deleted = FALSE`,
+    [userId]
+  );
+  return rows[0]?.branch_id ?? null;
+}
+
+async function resolveBranchIdForReport(req: Request): Promise<string | null> {
+  const explicit = req.query.branchId as string | undefined;
+  if (["COMPANY_ADMIN", "SUPER_ADMIN"].includes(req.user!.role)) {
+    return explicit ?? null;
+  }
+  return explicit ?? resolveOwnBranchId(req.user!.sub);
+}
+
+function periodBounds(type: string): { start: string; label: string } {
+  switch (type) {
+    case "daily":
+      return { start: "DATE_TRUNC('day', NOW())", label: "Today" };
+    case "weekly":
+      return { start: "NOW() - INTERVAL '7 days'", label: "Last 7 Days" };
+    case "monthly":
+      return { start: "DATE_TRUNC('month', NOW())", label: "This Month" };
+    default:
+      return { start: "NOW() - INTERVAL '7 days'", label: "Last 7 Days" };
+  }
+}
+
 // ─── Tenant scope helper ──────────────────────────────────────────────────────
 // Every query is scoped to the caller's tenant unless they are SUPER_ADMIN.
 function getTenantFilter(req: Request): { clause: string; param: string | null } {
@@ -597,6 +629,183 @@ router.get("/overview", requireAuth, requireMinRole("COMPANY_ADMIN"), async (req
   } catch (err: any) {
     console.error("[Analytics] Overview error:", err.message);
     res.status(500).json({ error: "INTERNAL_ERROR", message: "Failed to load overview data" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7. BRANCH REPORT (for the Branch Admin Portal "Reports" panel)
+//    Replaces the old hardcoded report templates. Real data, scoped to a
+//    single branch (and its tenant). Types: daily | weekly | monthly |
+//    employee | document | revenue
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/branch-report", requireAuth, requireMinRole("BRANCH_ADMIN"), async (req: Request, res: Response) => {
+  const tenantId = req.user!.tenantId;
+  if (!tenantId) {
+    res.status(400).json({ error: "NO_TENANT" });
+    return;
+  }
+
+  const branchId = await resolveBranchIdForReport(req);
+  if (!branchId) {
+    res.status(400).json({ error: "NO_BRANCH", message: "No branch associated with this account" });
+    return;
+  }
+
+  const reportType = (req.query.type as string) || "daily";
+
+  try {
+    if (reportType === "employee") {
+      const { start, label } = periodBounds((req.query.period as string) || "weekly");
+      const { rows } = await query<{
+        employee_id: string;
+        full_name: string;
+        job_role: string;
+        assigned_counter: number | null;
+        documents_processed: string;
+        tickets_served: string;
+        avg_processing_minutes: string | null;
+      }>(
+        `SELECT
+           e.id                                                              AS employee_id,
+           u.full_name,
+           e.job_role,
+           e.assigned_counter,
+           COUNT(DISTINCT d.id) FILTER (WHERE d.created_at >= ${start})     AS documents_processed,
+           COUNT(DISTINCT qt.id) FILTER (WHERE qt.completed_at >= ${start}) AS tickets_served,
+           AVG(EXTRACT(EPOCH FROM (qt.completed_at - qt.serving_at)) / 60)
+             FILTER (WHERE qt.completed_at >= ${start} AND qt.serving_at IS NOT NULL) AS avg_processing_minutes
+         FROM employees e
+         JOIN users u ON u.id = e.user_id
+         LEFT JOIN documents d ON d.processed_by = e.user_id AND d.branch_id = e.branch_id AND d.is_deleted = FALSE
+         LEFT JOIN queue_tickets qt ON qt.served_by = e.user_id AND qt.branch_id = e.branch_id
+         WHERE e.branch_id = $1 AND e.tenant_id = $2 AND e.is_deleted = FALSE
+         GROUP BY e.id, u.full_name, e.job_role, e.assigned_counter
+         ORDER BY documents_processed DESC, tickets_served DESC`,
+        [branchId, tenantId]
+      );
+
+      res.json({
+        type: "employee",
+        periodLabel: label,
+        employees: rows.map(r => ({
+          employeeId: r.employee_id,
+          name: r.full_name,
+          jobRole: r.job_role,
+          assignedCounter: r.assigned_counter,
+          documentsProcessed: parseInt(r.documents_processed, 10),
+          ticketsServed: parseInt(r.tickets_served, 10),
+          avgProcessingMinutes: r.avg_processing_minutes ? Math.round(parseFloat(r.avg_processing_minutes) * 10) / 10 : null,
+        })),
+      });
+      return;
+    }
+
+    if (reportType === "document") {
+      const { rows: byStatus } = await query<{ status: string; count: string }>(
+        `SELECT status, COUNT(*) AS count
+         FROM documents
+         WHERE branch_id = $1 AND tenant_id = $2 AND is_deleted = FALSE
+         GROUP BY status
+         ORDER BY count DESC`,
+        [branchId, tenantId]
+      );
+
+      const { rows: totals } = await query<{
+        total: string; notarised: string; pending: string; rejected: string;
+      }>(
+        `SELECT
+           COUNT(*)                                                                     AS total,
+           COUNT(*) FILTER (WHERE status = 'notarised')                                 AS notarised,
+           COUNT(*) FILTER (WHERE status IN ('draft','pending_review','approved','signed')) AS pending,
+           COUNT(*) FILTER (WHERE status IN ('rejected','revoked','expired'))            AS rejected
+         FROM documents
+         WHERE branch_id = $1 AND tenant_id = $2 AND is_deleted = FALSE`,
+        [branchId, tenantId]
+      );
+
+      res.json({
+        type: "document",
+        byStatus: byStatus.map(r => ({ status: r.status, count: parseInt(r.count, 10) })),
+        totals: {
+          total:     parseInt(totals[0]?.total     ?? "0", 10),
+          notarised: parseInt(totals[0]?.notarised ?? "0", 10),
+          pending:   parseInt(totals[0]?.pending   ?? "0", 10),
+          rejected:  parseInt(totals[0]?.rejected  ?? "0", 10),
+        },
+      });
+      return;
+    }
+
+    if (reportType === "revenue") {
+      // NOTE: This schema only tracks subscription/platform billing
+      // (payments -> subscriptions, tenant-level), not per-transaction
+      // branch cashier fees. There is no real data source for a
+      // branch-level cash report, so we surface that honestly instead
+      // of fabricating figures.
+      const { rows: mrr } = await query<{ mrr_cents: string }>(
+        `SELECT COALESCE(SUM(amount_cents), 0) AS mrr_cents
+         FROM subscriptions WHERE tenant_id = $1 AND status = 'active'`,
+        [tenantId]
+      );
+      res.json({
+        type: "revenue",
+        branchRevenueAvailable: false,
+        message: "Per-branch transaction revenue isn't tracked in the current schema. Showing company-level subscription billing instead.",
+        tenantMrrDollars: Math.round(parseInt(mrr[0]?.mrr_cents ?? "0", 10) / 100),
+      });
+      return;
+    }
+
+    // daily | weekly | monthly
+    const { start, label } = periodBounds(reportType);
+    const [docRow, queueRow, waitingRow, procTimeRow] = await Promise.all([
+      query<{ total: string; notarised: string; customers: string }>(
+        `SELECT COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE status = 'notarised') AS notarised,
+                COUNT(DISTINCT customer_id) AS customers
+         FROM documents
+         WHERE branch_id = $1 AND tenant_id = $2 AND is_deleted = FALSE
+           AND created_at >= ${start}`,
+        [branchId, tenantId]
+      ),
+      query<{ completed: string }>(
+        `SELECT COUNT(*) AS completed
+         FROM queue_tickets
+         WHERE branch_id = $1 AND tenant_id = $2
+           AND status = 'completed' AND completed_at >= ${start}`,
+        [branchId, tenantId]
+      ),
+      query<{ waiting: string }>(
+        `SELECT COUNT(*) AS waiting
+         FROM queue_tickets
+         WHERE branch_id = $1 AND tenant_id = $2
+           AND status = 'waiting' AND ticket_date = CURRENT_DATE`,
+        [branchId, tenantId]
+      ),
+      query<{ avg_minutes: string | null }>(
+        `SELECT AVG(EXTRACT(EPOCH FROM (completed_at - serving_at)) / 60) AS avg_minutes
+         FROM queue_tickets
+         WHERE branch_id = $1 AND tenant_id = $2
+           AND status = 'completed' AND completed_at >= ${start} AND serving_at IS NOT NULL`,
+        [branchId, tenantId]
+      ),
+    ]);
+
+    res.json({
+      type: reportType,
+      periodLabel: label,
+      documentsProcessed: parseInt(docRow.rows[0]?.total ?? "0", 10),
+      documentsNotarised: parseInt(docRow.rows[0]?.notarised ?? "0", 10),
+      customersServedDocs: parseInt(docRow.rows[0]?.customers ?? "0", 10),
+      queueCompleted: parseInt(queueRow.rows[0]?.completed ?? "0", 10),
+      queueWaitingNow: parseInt(waitingRow.rows[0]?.waiting ?? "0", 10),
+      avgProcessingMinutes: procTimeRow.rows[0]?.avg_minutes
+        ? Math.round(parseFloat(procTimeRow.rows[0].avg_minutes) * 10) / 10
+        : null,
+    });
+  } catch (err: any) {
+    console.error("[Analytics] Branch report error:", err.message);
+    res.status(500).json({ error: "INTERNAL_ERROR", message: "Failed to load branch report" });
   }
 });
 
