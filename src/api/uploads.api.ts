@@ -83,7 +83,7 @@ export const uploadsApi = {
     return api.get<{ uploads: FileUploadRecord[]; total: number }>(`/api/uploads${qs}`);
   },
 
-  upload: async (file: File, category: string) => {
+  upload: async (file: File, category: string, documentId?: string) => {
     const validationError = validateUploadFile(file);
     if (validationError) {
       throw new ApiException(422, "VALIDATION_ERROR", validationError);
@@ -94,6 +94,7 @@ export const uploadsApi = {
       mimeType: file.type || "application/octet-stream",
       contentBase64,
       category,
+      ...(documentId ? { documentId } : {}),
     });
   },
 

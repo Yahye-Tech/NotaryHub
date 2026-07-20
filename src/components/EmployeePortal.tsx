@@ -9,6 +9,7 @@ import { QueueTicket, NotaryDocument, Customer } from "../types";
 import { documentsApi, customersApi } from "../api/documents.api";
 import { appointmentsApi, toUiAppointment } from "../api/appointments.api";
 import { queueApi } from "../api/queue.api";
+import { uploadsApi } from "../api/uploads.api";
 import { getAccessToken, ApiException } from "../api/client";
 
 interface DeskCustomer {
@@ -71,12 +72,6 @@ interface EmployeePortalProps {
   biometricScanRunning: boolean;
   biometricProgress: number;
   onTriggerFingerprintScan: () => void;
-  canvasRef: React.RefObject<HTMLCanvasElement | null>;
-  onStartDrawing: (e: React.MouseEvent<HTMLCanvasElement>) => void;
-  onDraw: (e: React.MouseEvent<HTMLCanvasElement>) => void;
-  onStopDrawing: () => void;
-  onClearSignature: () => void;
-  hasSignature: boolean;
   isAllowedCreateDoc: boolean;
   onLogout: () => void;
 }
@@ -111,12 +106,6 @@ export default function EmployeePortal({
   biometricScanRunning: propBioScanning,
   biometricProgress: propBioProgress,
   onTriggerFingerprintScan,
-  canvasRef,
-  onStartDrawing,
-  onDraw,
-  onStopDrawing,
-  onClearSignature,
-  hasSignature,
   isAllowedCreateDoc,
   onLogout
 }: EmployeePortalProps) {
@@ -143,6 +132,77 @@ export default function EmployeePortal({
   const [customers, setCustomers] = useState<DeskCustomer[]>([]);
 
   const [localDocs, setLocalDocs] = useState<NotaryDocument[]>([]);
+
+  // Real signature pad — canvas drawing + upload to the real /api/uploads endpoint
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const isDrawingRef = useRef(false);
+  const [hasSignature, setHasSignature] = useState(false);
+  const [signatureDocId, setSignatureDocId] = useState<string>("");
+  const [signatureSaving, setSignatureSaving] = useState(false);
+
+  const getCanvasPoint = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  };
+
+  const onStartDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    isDrawingRef.current = true;
+    const { x, y } = getCanvasPoint(e);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  };
+
+  const onDraw = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isDrawingRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    const { x, y } = getCanvasPoint(e);
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    if (!hasSignature) setHasSignature(true);
+  };
+
+  const onStopDrawing = () => {
+    isDrawingRef.current = false;
+  };
+
+  const onClearSignature = () => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setHasSignature(false);
+  };
+
+  const handleLinkSignature = async () => {
+    const canvas = canvasRef.current;
+    if (!canvas || !hasSignature) {
+      alert("Please draw a signature first.");
+      return;
+    }
+    setSignatureSaving(true);
+    try {
+      const blob: Blob | null = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+      if (!blob) throw new Error("Failed to capture signature image.");
+      const file = new File([blob], `signature-${Date.now()}.png`, { type: "image/png" });
+      const res = await uploadsApi.upload(file, "SIGNATURE", signatureDocId || undefined);
+      alert(`✓ Signature saved (upload ${res.upload.id})${signatureDocId ? " and linked to the selected document." : "."}`);
+      onClearSignature();
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to save signature.");
+    } finally {
+      setSignatureSaving(false);
+    }
+  };
 
   const [localAppointments, setLocalAppointments] = useState([
   ]);
@@ -1690,7 +1750,7 @@ export default function EmployeePortal({
                 {/* Signature Board and routing */}
                 <div className="bg-white border border-slate-200 p-5 rounded-xl shadow-sm space-y-4">
                   <div className="flex justify-between items-center">
-                    <span className="text-[10px] font-mono text-slate-400 block uppercase font-bold">Vector signature touchpad</span>
+                    <span className="text-[10px] font-mono text-slate-400 block uppercase font-bold">Signature pad</span>
                     <button onClick={onClearSignature} className="text-xs text-blue-600 font-semibold underline">Clear Board</button>
                   </div>
 
@@ -1706,13 +1766,31 @@ export default function EmployeePortal({
                       className="w-full h-full bg-slate-50"
                     />
                     {!hasSignature && (
-                      <span className="absolute select-none pointer-events-none text-[10px] text-slate-400">Write customer signature here</span>
+                      <span className="absolute select-none pointer-events-none text-[10px] text-slate-400">Draw the customer's signature here</span>
                     )}
                   </div>
 
+                  <div className="space-y-2">
+                    <label className="block text-[10px] text-slate-500 font-mono uppercase">Link to document (optional)</label>
+                    <select
+                      value={signatureDocId}
+                      onChange={(e) => setSignatureDocId(e.target.value)}
+                      className="w-full bg-slate-50 text-xs border border-slate-250 p-2 rounded-lg font-semibold"
+                    >
+                      <option value="">Save unlinked</option>
+                      {localDocs.filter(d => d.status !== "notarised" && d.status !== "rejected" && d.status !== "revoked").map(d => (
+                        <option key={d.id} value={d.id}>{d.document_number} — {d.title}</option>
+                      ))}
+                    </select>
+                  </div>
+
                   <div className="flex gap-2">
-                    <button onClick={() => alert("Digital signature validated and mapped to Active Document metadata buffers successfully.")} className="w-full bg-slate-900 hover:bg-slate-800 text-xs text-white py-2 rounded-lg font-bold transition shadow-xs">
-                      Link Signature to Active Draft Document
+                    <button
+                      onClick={handleLinkSignature}
+                      disabled={signatureSaving || !hasSignature}
+                      className="w-full bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-xs text-white py-2 rounded-lg font-bold transition shadow-xs"
+                    >
+                      {signatureSaving ? "Saving…" : "Save Signature"}
                     </button>
                   </div>
                 </div>

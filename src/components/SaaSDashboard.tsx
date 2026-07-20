@@ -816,12 +816,6 @@ export default function SaaSDashboard() {
             biometricScanRunning={false}
             biometricProgress={0}
             onTriggerFingerprintScan={() => {}}
-            canvasRef={{ current: null }}
-            onStartDrawing={() => {}}
-            onDraw={() => {}}
-            onStopDrawing={() => {}}
-            onClearSignature={() => {}}
-            hasSignature={false}
             isAllowedCreateDoc={permissionsMatrix.EMPLOYEE?.CREATE_DOCUMENT}
             onLogout={handleLogout}
           />
