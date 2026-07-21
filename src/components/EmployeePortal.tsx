@@ -41,7 +41,6 @@ interface EmployeePortalProps {
   employeeName?: string;
   queue: QueueTicket[];
   onAnnounceTicket: (ticket: QueueTicket, counter: number) => void;
-  onAdvanceTicketStatus: (id: string, status: QueueTicket["status"]) => void;
   ocrLoading: boolean;
   ocrData: any;
   onIdentityOcrScan: (sampleIndex: number) => void;
@@ -55,7 +54,6 @@ export default function EmployeePortal({
   employeeName,
   queue: propQueue,
   onAnnounceTicket,
-  onAdvanceTicketStatus,
   ocrLoading,
   ocrData,
   onIdentityOcrScan,
@@ -546,34 +544,46 @@ export default function EmployeePortal({
     setAppForm({ customer_name: "", service_type: "Power of Attorney", date: "", time: "" });
   };
 
-  const handleCallNextTicket = () => {
+  const handleCallNextTicket = async () => {
     const waiting = localQueue.find(q => q.status === "waiting");
     if (!waiting) {
       alert("No waiting customers in the Lobby Queue!");
       return;
     }
-    // Set active ticket to calling
-    setLocalQueue(prev => prev.map(q => {
-      if (q.id === waiting.id) {
-        return { ...q, status: "calling" as const, called_counter: 2 };
-      }
-      if (q.status === "calling" || q.status === "serving") {
-        return { ...q, status: "completed" as const };
-      }
-      return q;
-    }));
-    onAnnounceTicket(waiting, 2);
-    addNotification("Paging Customer", `Calling ${waiting.ticket_number} to clerk workstation 2.`, "info");
+    try {
+      const res = await queueApi.callNext(branchId, 2);
+      setLocalQueue(prev => prev.map(q => {
+        if (q.id === res.ticket.id) return res.ticket;
+        if (q.status === "calling" || q.status === "serving") {
+          return { ...q, status: "completed" as const };
+        }
+        return q;
+      }));
+      onAnnounceTicket(res.ticket, 2);
+      addNotification("Paging Customer", `Calling ${res.ticket.ticket_number} to clerk workstation 2.`, "info");
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to call next ticket.");
+    }
   };
 
-  const handleSkipTicket = (id: string) => {
-    setLocalQueue(prev => prev.map(q => q.id === id ? { ...q, status: "passed" as const } : q));
-    addNotification("Ticket Skipped", "Paging queue iterated.", "warn");
+  const handleSkipTicket = async (id: string) => {
+    try {
+      const res = await queueApi.skip(id);
+      setLocalQueue(prev => prev.map(q => q.id === id ? res.ticket : q));
+      addNotification("Ticket Skipped", "Paging queue iterated.", "warn");
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to skip ticket.");
+    }
   };
 
-  const handleCompleteTicket = (id: string) => {
-    setLocalQueue(prev => prev.map(q => q.id === id ? { ...q, status: "completed" as const } : q));
-    addNotification("Ticket Completed", "Lobby customer service finished.", "success");
+  const handleCompleteTicket = async (id: string) => {
+    try {
+      const res = await queueApi.complete(id);
+      setLocalQueue(prev => prev.map(q => q.id === id ? res.ticket : q));
+      addNotification("Ticket Completed", "Lobby customer service finished.", "success");
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to complete ticket.");
+    }
   };
 
   // AI Questionnaire Builder logic

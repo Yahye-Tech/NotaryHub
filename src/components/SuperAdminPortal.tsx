@@ -1521,6 +1521,7 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
 
                     <div className="pt-3.5 border-t border-slate-100">
                       <span className="block text-[10.5px] font-mono text-slate-400 uppercase font-bold tracking-wider mb-2.5">Global Feature Switches</span>
+                      <p className="text-[10px] text-amber-600 mb-2">Preview only — these switches aren't yet wired to gate the actual OCR/AI-drafting features for employees.</p>
                       <div className="space-y-2.5">
                         <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl">
                           <div>

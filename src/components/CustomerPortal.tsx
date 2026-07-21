@@ -313,7 +313,7 @@ export default function CustomerPortal({
       onBookAppointment(bookingBranchId, customerName, customerEmail, bookingService, `${bookingDate} @ ${bookingTime}`);
       await loadAppointments();
 
-      const branchName = branches.find(b => b.id === bookingBranchId)?.name || "Bosaso Main Branch";
+      const branchName = branches.find(b => b.id === bookingBranchId)?.name || "your branch";
       setNotifications(prev => [
         {
           id: "not-" + Date.now(),

@@ -32,7 +32,6 @@ interface CompanyAdminPortalProps {
   onAddEmployee: (branchId: string, name: string, email: string, role: Employee["job_role"], password: string) => void;
   onEditEmployee: (empId: string, name: string, email: string, role: Employee["job_role"], branchId: string) => void;
   onDeleteEmployee: (empId: string) => void;
-  onToggleArchiveEmployee: (empId: string) => void;
   onToggleEmployeeStatus: (id: string) => void;
   onToggleEmployeeSuspend: (id: string) => void;
   onResetEmployeePassword: (id: string) => void;
@@ -64,7 +63,6 @@ export default function CompanyAdminPortal({
   onAddEmployee,
   onEditEmployee,
   onDeleteEmployee,
-  onToggleArchiveEmployee,
   onToggleEmployeeStatus,
   onToggleEmployeeSuspend,
   onResetEmployeePassword,
@@ -253,14 +251,12 @@ export default function CompanyAdminPortal({
     alert("✓ Staff registration dossier revised successfully.");
   };
 
-  const handleToggleArchiveBranchLocal = (bId: string) => {
-    onToggleArchiveBranch(bId);
-    alert("Toggled office archive status.");
-  };
-
-  const handleToggleArchiveEmployeeLocal = (empId: string) => {
-    onToggleArchiveEmployee(empId);
-    alert("Toggled staff member archive index.");
+  const handleToggleArchiveBranchLocal = async (bId: string) => {
+    try {
+      await onToggleArchiveBranch(bId);
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to update branch archive status.");
+    }
   };
 
   const handleDeleteBranchLocal = (bId: string, name: string) => {
@@ -747,12 +743,12 @@ export default function CompanyAdminPortal({
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {activeTenantBranches.map(b => (
-                          <tr key={b.id} className={`hover:bg-slate-50/50 ${b.archived ? "bg-slate-50/50 opacity-75" : ""}`}>
+                          <tr key={b.id} className={`hover:bg-slate-50/50 ${b.status === "archived" ? "bg-slate-50/50 opacity-75" : ""}`}>
                             <td className="p-4 font-semibold text-slate-900 flex items-center gap-1.5">
                               <Building2 className="w-4 h-4 text-indigo-600" />
                               <div className="flex flex-col">
                                 <span>{b.name}</span>
-                                {b.archived && <span className="text-[9px] font-mono text-amber-600 font-semibold">[Archived File]</span>}
+                                {b.status === "archived" && <span className="text-[9px] font-mono text-amber-600 font-semibold">[Archived File]</span>}
                               </div>
                             </td>
                             <td className="p-4 font-mono select-all text-slate-600">
@@ -765,9 +761,13 @@ export default function CompanyAdminPortal({
                               {b.countersCount} counters
                             </td>
                             <td className="p-4">
-                              {b.archived ? (
+                              {b.status === "archived" ? (
                                 <span className="bg-slate-100 text-slate-700 border border-slate-200 font-sans font-bold px-2 py-0.5 rounded-full text-[9px]">
                                   Archived
+                                </span>
+                              ) : b.status === "suspended" ? (
+                                <span className="bg-amber-50 text-amber-700 border border-amber-200 font-sans font-bold px-2 py-0.5 rounded-full text-[9px]">
+                                  Suspended
                                 </span>
                               ) : (
                                 <span className="bg-emerald-50 text-emerald-805 border border-emerald-200 font-sans font-bold px-2 py-0.5 rounded-full text-[9px]">
@@ -791,9 +791,9 @@ export default function CompanyAdminPortal({
                               </button>
                               <button
                                 onClick={() => handleToggleArchiveBranchLocal(b.id)}
-                                className={`text-[10px] px-2 py-1 rounded font-bold transition ${b.archived ? "bg-blue-50 text-blue-700 hover:bg-blue-100" : "bg-amber-50 text-amber-700 hover:bg-amber-100"}`}
+                                className={`text-[10px] px-2 py-1 rounded font-bold transition ${b.status === "archived" ? "bg-blue-50 text-blue-700 hover:bg-blue-100" : "bg-amber-50 text-amber-700 hover:bg-amber-100"}`}
                               >
-                                {b.archived ? "Restore" : "Archive"}
+                                {b.status === "archived" ? "Restore" : "Archive"}
                               </button>
                               {branchDeleteConfirmId === b.id ? (
                                 <span className="inline-flex gap-1.5 items-center">
@@ -1002,11 +1002,10 @@ export default function CompanyAdminPortal({
                         {localEmployees.map(e => {
                           const associatedBranch = localBranches.find(b => b.id === e.branch_id);
                           return (
-                            <tr key={e.id} className={`hover:bg-slate-50/50 ${e.archived ? "bg-slate-50/30 opacity-70" : ""}`}>
+                            <tr key={e.id} className={`hover:bg-slate-50/50 ${e.status === "suspended" ? "bg-slate-50/30 opacity-70" : ""}`}>
                               <td className="p-4 font-bold text-slate-900">
                                 <div className="flex flex-col">
                                   <span>{e.full_name}</span>
-                                  {e.archived && <span className="text-[9px] font-mono text-amber-600">[Archived Account]</span>}
                                 </div>
                               </td>
                               <td className="p-4 font-mono select-all text-[11px] text-slate-550">
@@ -1059,12 +1058,6 @@ export default function CompanyAdminPortal({
                                     title="Regenerate credentials and log reset"
                                   >
                                     <KeyRound className="w-2.5 h-2.5" /> Reset Pass
-                                  </button>
-                                  <button
-                                    onClick={() => handleToggleArchiveEmployeeLocal(e.id)}
-                                    className="text-[9.5px] bg-amber-50 text-amber-700 hover:bg-amber-100 px-1.5 py-1 rounded font-bold transition"
-                                  >
-                                    {e.archived ? "Restore" : "Archive"}
                                   </button>
                                   <button
                                     onClick={() => {

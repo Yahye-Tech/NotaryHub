@@ -355,6 +355,13 @@ export default function SaaSDashboard() {
     },
   ]);
 
+  // Feature flags — real toggle state (session-only preview; not yet enforced
+  // as a gate on the actual OCR/AI-drafting features elsewhere in the app)
+  const [featureFlags, setFeatureFlags] = useState({ ocr: true, docGen: true, voiceChime: true });
+  const handleToggleFeature = useCallback((flag: string) => {
+    setFeatureFlags(prev => ({ ...prev, [flag]: !prev[flag as keyof typeof prev] }));
+  }, []);
+
   const [permissionsMatrix, setPermissionsMatrix] = useState<PermissionsMatrix>({
     SUPER_ADMIN:   { CREATE_DOCUMENT: true,  EDIT_DOCUMENT: true,  DELETE_DOCUMENT: true,  VIEW_REPORTS: true,  CREATE_EMPLOYEE: true,  CREATE_BRANCH: true, MANAGE_SUBSCRIPTIONS: true },
     COMPANY_ADMIN: { CREATE_DOCUMENT: true,  EDIT_DOCUMENT: true,  DELETE_DOCUMENT: false, VIEW_REPORTS: true,  CREATE_EMPLOYEE: true,  CREATE_BRANCH: true, MANAGE_SUBSCRIPTIONS: false },
@@ -483,6 +490,15 @@ export default function SaaSDashboard() {
     setBranches(prev => prev.filter(b => b.id !== branchId));
     setEmployees(prev => prev.filter(e => e.branch_id !== branchId));
   }, [currentUser]);
+
+  const handleToggleArchiveBranch = useCallback(async (branchId: string) => {
+    if (!currentUser?.tenantId) return;
+    const branch = branches.find(b => b.id === branchId);
+    if (!branch) return;
+    const nextStatus = branch.status === "archived" ? "active" : "archived";
+    const res = await branchesApi.update(currentUser.tenantId, branchId, { status: nextStatus });
+    setBranches(prev => prev.map(b => b.id === branchId ? res.branch : b));
+  }, [currentUser, branches]);
 
   // ── Employee CRUD ─────────────────────────────────────────────────────────
   const handleAddEmployee = useCallback(async (
@@ -723,8 +739,8 @@ export default function SaaSDashboard() {
             documents={[]}
             invoices={[]}
             auditLogs={[]}
-            featureFlags={{ ocr: true, docGen: true, voiceChime: true }}
-            onToggleFeature={() => {}}
+            featureFlags={featureFlags}
+            onToggleFeature={handleToggleFeature}
             onLogout={handleLogout}
             permissionsMatrix={permissionsMatrix}
             onUpdatePermissions={setPermissionsMatrix}
@@ -741,12 +757,11 @@ export default function SaaSDashboard() {
             onAddBranch={handleAddBranch}
             onEditBranch={handleEditBranch}
             onDeleteBranch={handleDeleteBranch}
-            onToggleArchiveBranch={() => {}}
+            onToggleArchiveBranch={handleToggleArchiveBranch}
             employees={employees.filter(e => e.tenant_id === currentUser.tenantId)}
             onAddEmployee={handleAddEmployee}
             onEditEmployee={handleEditEmployee}
             onDeleteEmployee={handleDeleteEmployee}
-            onToggleArchiveEmployee={() => {}}
             onToggleEmployeeStatus={handleToggleEmployeeStatus}
             onToggleEmployeeSuspend={handleToggleEmployeeSuspend}
             onResetEmployeePassword={handleResetEmployeePassword}
@@ -792,7 +807,6 @@ export default function SaaSDashboard() {
             employeeName={currentUser.username}
             queue={[]}
             onAnnounceTicket={() => {}}
-            onAdvanceTicketStatus={() => {}}
             ocrLoading={false}
             ocrData={null}
             onIdentityOcrScan={() => {}}
