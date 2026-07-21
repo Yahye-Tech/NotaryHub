@@ -796,26 +796,6 @@ export default function SaaSDashboard() {
             ocrLoading={false}
             ocrData={null}
             onIdentityOcrScan={() => {}}
-            docTemplate=""
-            setDocTemplate={() => {}}
-            docPrincipal=""
-            setDocPrincipal={() => {}}
-            docAgent={currentUser.username}
-            setDocAgent={() => {}}
-            docJurisdiction=""
-            setDocJurisdiction={() => {}}
-            docClauses=""
-            setDocClauses={() => {}}
-            docGenerating={false}
-            draftedDocContent=""
-            onTriggerDocumentDraft={() => {}}
-            activeCreatedDoc={null}
-            onCommitSignaturesAndNotarize={() => {}}
-            fingerprintReady={false}
-            capturedFingerHash=""
-            biometricScanRunning={false}
-            biometricProgress={0}
-            onTriggerFingerprintScan={() => {}}
             isAllowedCreateDoc={permissionsMatrix.EMPLOYEE?.CREATE_DOCUMENT}
             onLogout={handleLogout}
           />

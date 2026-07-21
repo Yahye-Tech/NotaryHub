@@ -6,11 +6,12 @@ import {
   Printer, Upload, CreditCard, Send, Lock, Eye, CheckSquare, XCircle, Bell, ArrowRight, Menu, X, Sun, Moon
 } from "lucide-react";
 import { QueueTicket, NotaryDocument, Customer } from "../types";
-import { documentsApi, customersApi } from "../api/documents.api";
+import { documentsApi, customersApi, CustomerDocumentHistoryItem, CustomerActivityItem } from "../api/documents.api";
 import { appointmentsApi, toUiAppointment } from "../api/appointments.api";
 import { queueApi } from "../api/queue.api";
 import { uploadsApi } from "../api/uploads.api";
 import { getAccessToken, ApiException } from "../api/client";
+import { authApi } from "../api/auth.api";
 
 interface DeskCustomer {
   id: string;
@@ -20,10 +21,6 @@ interface DeskCustomer {
   nationalId: string;
   address: string;
   dob: string;
-  fingerprintCaptured?: boolean;
-  fingerprintVerified?: boolean;
-  signatureCaptured?: boolean;
-  visits?: number;
 }
 
 function customerToDesk(c: Customer): DeskCustomer {
@@ -35,10 +32,6 @@ function customerToDesk(c: Customer): DeskCustomer {
     nationalId: c.id_number ?? "",
     address: c.address ?? "",
     dob: c.date_of_birth ?? "",
-    fingerprintCaptured: false,
-    fingerprintVerified: false,
-    signatureCaptured: false,
-    visits: 1,
   };
 }
 
@@ -52,26 +45,6 @@ interface EmployeePortalProps {
   ocrLoading: boolean;
   ocrData: any;
   onIdentityOcrScan: (sampleIndex: number) => void;
-  docTemplate: string;
-  setDocTemplate: (v: string) => void;
-  docPrincipal: string;
-  setDocPrincipal: (v: string) => void;
-  docAgent: string;
-  setDocAgent: (v: string) => void;
-  docJurisdiction: string;
-  setDocJurisdiction: (v: string) => void;
-  docClauses: string;
-  setDocClauses: (v: string) => void;
-  docGenerating: boolean;
-  draftedDocContent: string;
-  onTriggerDocumentDraft: () => void;
-  activeCreatedDoc: NotaryDocument | null;
-  onCommitSignaturesAndNotarize: () => void;
-  fingerprintReady: boolean;
-  capturedFingerHash: string;
-  biometricScanRunning: boolean;
-  biometricProgress: number;
-  onTriggerFingerprintScan: () => void;
   isAllowedCreateDoc: boolean;
   onLogout: () => void;
 }
@@ -86,26 +59,6 @@ export default function EmployeePortal({
   ocrLoading,
   ocrData,
   onIdentityOcrScan,
-  docTemplate,
-  setDocTemplate,
-  docPrincipal,
-  setDocPrincipal,
-  docAgent,
-  setDocAgent,
-  docJurisdiction,
-  setDocJurisdiction,
-  docClauses,
-  setDocClauses,
-  docGenerating,
-  draftedDocContent: propDraftedDoc,
-  onTriggerDocumentDraft,
-  activeCreatedDoc,
-  onCommitSignaturesAndNotarize,
-  fingerprintReady: propFingerprintReady,
-  capturedFingerHash: propFingerHash,
-  biometricScanRunning: propBioScanning,
-  biometricProgress: propBioProgress,
-  onTriggerFingerprintScan,
   isAllowedCreateDoc,
   onLogout
 }: EmployeePortalProps) {
@@ -132,6 +85,11 @@ export default function EmployeePortal({
   const [customers, setCustomers] = useState<DeskCustomer[]>([]);
 
   const [localDocs, setLocalDocs] = useState<NotaryDocument[]>([]);
+  const [selfUserId, setSelfUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    authApi.me().then(res => setSelfUserId(res.id)).catch(() => setSelfUserId(null));
+  }, []);
 
   // Real signature pad — canvas drawing + upload to the real /api/uploads endpoint
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -216,9 +174,7 @@ export default function EmployeePortal({
   const [localInvoices, setLocalInvoices] = useState([
   ]);
 
-  const [notifications, setNotifications] = useState([
-    { id: "notif-03", title: "Document Approved", text: "Power of Attorney for Ahmed Ali notarized successfully", time: "2m ago", type: "success" }
-  ]);
+  const [notifications, setNotifications] = useState<{ id: string; title: string; text: string; time: string; type: string }[]>([]);
 
   // Form states
   const [searchQuery, setSearchQuery] = useState("");
@@ -233,7 +189,7 @@ export default function EmployeePortal({
 
   // AI Questionnaire
   const [aiDocType, setAiDocType] = useState("Power of Attorney");
-  const [qaParams, setQaParams] = useState({ grantor: "", receiver: "", purpose: "", duration: "" });
+  const [qaParams, setQaParams] = useState({ grantor: "", receiver: "", purpose: "", duration: "", jurisdiction: "" });
   const [aiDraftResults, setAiDraftResults] = useState("");
   const [aiDraftLoading, setAiDraftLoading] = useState(false);
 
@@ -443,16 +399,20 @@ export default function EmployeePortal({
       return;
     }
     const docType = ((newDoc as any)?.type ?? "OTHER").toUpperCase().replace(/ /g, "_") as NotaryDocument["doc_type"];
-    const title = `${(newDoc as any)?.type ?? "Document"} - ${(newDoc as any)?.principal ?? "Unnamed Party"}`;
+    const parties = (newDoc as any)?.parties?.trim() ?? "";
+    const customTitle = (newDoc as any)?.title?.trim();
+    const title = customTitle || `${(newDoc as any)?.type ?? "Document"}${parties ? ` - ${parties}` : ""}`;
     try {
       const res = await documentsApi.create({
         branchId,
         title,
         docType: docType.includes("_") ? docType as NotaryDocument["doc_type"] : "OTHER",
         content: (newDoc as any)?.content ?? "",
+        summary: parties ? `Parties: ${parties}` : undefined,
       });
       setLocalDocs(prev => [res.document, ...prev]);
       addNotification("Document Draft Created", `Draft saved: "${res.document.title}".`, "info");
+      setNewDoc({ type: "", principal: "", parties: "", title: "", content: "" });
     } catch (err) {
       alert(err instanceof ApiException ? err.message : "Failed to create document.");
     }
@@ -639,7 +599,7 @@ export default function EmployeePortal({
         body: JSON.stringify({
           templateType: aiDocType,
           parties: [qaParams.grantor, qaParams.receiver],
-          jurisdiction: docJurisdiction || "Somalia",
+          jurisdiction: qaParams.jurisdiction || "Somalia",
           specialClauses: qaParams.purpose,
           customPrompt: qaParams.duration ? `Duration: ${qaParams.duration}` : undefined,
         }),
@@ -653,7 +613,7 @@ export default function EmployeePortal({
         docType: "POWER_OF_ATTORNEY",
         content: aiData.document,
         summary: `${aiDocType} between ${qaParams.grantor} and ${qaParams.receiver}`,
-        jurisdiction: docJurisdiction || "Somalia",
+        jurisdiction: qaParams.jurisdiction || "Somalia",
         aiGenerated: true,
       });
 
@@ -708,7 +668,7 @@ export default function EmployeePortal({
           const namePart = userMsg.replace(/find\s+(customer\s+)?/i, "").trim();
           const found = customers.find(c => c.name.toLowerCase().includes(namePart.toLowerCase()));
           fallbackReply = found 
-            ? `CUSTOMER FOUND: ${found.name}\nPhone: ${found.phone}\nID Number: ${found.nationalId}\nFingerprint: ${found.fingerprintCaptured ? "Captured" : "Missing"}\nVisits: ${found.visits} total records.` 
+            ? `CUSTOMER FOUND: ${found.name}\nPhone: ${found.phone}\nID Number: ${found.nationalId}` 
             : `Customer search for "${namePart}" yielded 0 items. Ensure spelling is precise.`;
         } else if (userMsg.toLowerCase().includes("pending")) {
           fallbackReply = `PENDING SYSTEM INVOICES:\n` + localInvoices.filter(i => i.status === "unpaid").map(i => `- ${i.customer_name} (${i.invoiceNumber}): $${i.amount}`).join("\n");
@@ -755,6 +715,12 @@ export default function EmployeePortal({
     c.nationalId.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  // Real personal shift stats — derived from actually-loaded documents, no fabricated targets
+  const todayStr = new Date().toDateString();
+  const myDocsToday = localDocs.filter(d => d.processed_by === selfUserId && new Date(d.created_at).toDateString() === todayStr);
+  const myNotarisedToday = localDocs.filter(d => d.processed_by === selfUserId && d.notarised_at && new Date(d.notarised_at).toDateString() === todayStr);
+  const myUniqueCustomersToday = new Set(myDocsToday.map(d => d.customer_id).filter(Boolean)).size;
+
   const filteredDocs = localDocs.filter(d => 
     !d.is_deleted && (
       d.title.toLowerCase().includes(docSearchQuery.toLowerCase()) ||
@@ -763,6 +729,25 @@ export default function EmployeePortal({
   );
 
   const selectedCust = customers.find(c => c.id === selectedCustId) ?? customers[0] ?? null;
+
+  // Real customer document/activity history (replaces hardcoded fake session records)
+  const [custHistory, setCustHistory] = useState<{
+    documents: CustomerDocumentHistoryItem[];
+    activity: CustomerActivityItem[];
+  } | null>(null);
+  const [custHistoryLoading, setCustHistoryLoading] = useState(false);
+
+  useEffect(() => {
+    if (!selectedCust) {
+      setCustHistory(null);
+      return;
+    }
+    setCustHistoryLoading(true);
+    customersApi.history(selectedCust.id)
+      .then(res => setCustHistory({ documents: res.documents, activity: res.activity }))
+      .catch(() => setCustHistory(null))
+      .finally(() => setCustHistoryLoading(false));
+  }, [selectedCust?.id]);
 
   return (
     <div className={`space-y-6 p-1 dark-portal-wrapper ${isDarkMode ? "dark" : ""}`} id="clerk-workspace-portal">
@@ -927,7 +912,7 @@ export default function EmployeePortal({
                 activeTab === "biometrics" ? "bg-blue-600 text-white font-bold" : "text-slate-600 hover:bg-slate-50"
               }`}
             >
-              <Fingerprint className="w-3.5 h-3.5" /> Biometrics & ID OCR
+              <Scan className="w-3.5 h-3.5" /> ID Scan & Signature
             </button>
 
             <button
@@ -1018,11 +1003,13 @@ export default function EmployeePortal({
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                 <div className="bg-white border border-slate-200 p-3.5 rounded-xl text-center shadow-sm">
                   <span className="block text-[10px] text-slate-500 font-mono uppercase tracking-wider">Desk Clients</span>
-                  <span className="block text-xl font-bold font-sans text-slate-900 mt-1">25</span>
+                  <span className="block text-xl font-bold font-sans text-slate-900 mt-1">{customers.length}</span>
                 </div>
                 <div className="bg-white border border-slate-200 p-3.5 rounded-xl text-center shadow-sm">
                   <span className="block text-[10px] text-slate-500 font-mono uppercase tracking-wider">Bookings Today</span>
-                  <span className="block text-xl font-bold font-sans text-blue-600 mt-1">12</span>
+                  <span className="block text-xl font-bold font-sans text-blue-600 mt-1">
+                    {localAppointments.filter(a => new Date(a.appointmentTime).toDateString() === new Date().toDateString()).length}
+                  </span>
                 </div>
                 <div className="bg-white border border-slate-200 p-3.5 rounded-xl text-center shadow-sm">
                   <span className="block text-[10px] text-slate-500 font-mono uppercase tracking-wider">Queue Lobby</span>
@@ -1034,7 +1021,7 @@ export default function EmployeePortal({
                 </div>
                 <div className="bg-white border border-slate-200 p-3.5 rounded-xl text-center shadow-sm col-span-2 md:col-span-1">
                   <span className="block text-[10px] text-slate-500 font-mono uppercase tracking-wider">Completed</span>
-                  <span className="block text-xl font-bold font-sans text-emerald-600 mt-1">20</span>
+                  <span className="block text-xl font-bold font-sans text-emerald-600 mt-1">{localDocs.filter(d => d.status === "notarised").length}</span>
                 </div>
               </div>
 
@@ -1045,42 +1032,30 @@ export default function EmployeePortal({
                 <div className="md:col-span-7 bg-white border border-slate-200 p-5 rounded-xl shadow-sm space-y-4">
                   <span className="text-[10px] font-mono text-slate-400 block uppercase font-bold tracking-wider">My Shift Statistics</span>
                   
-                  {/* Styled HTML graphical bars */}
+                  {/* Real personal shift stats — no fabricated targets */}
                   <div className="space-y-3">
                     <div>
                       <div className="flex justify-between items-center text-xs font-sans mb-1">
-                        <span className="text-slate-600">Documents Notarized & Processed</span>
-                        <span className="font-bold text-slate-900">18 / 25 daily target</span>
-                      </div>
-                      <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                        <div className="bg-blue-600 h-full rounded-full" style={{ width: "72%" }}></div>
+                        <span className="text-slate-600">Documents Created Today</span>
+                        <span className="font-bold text-slate-900">{myDocsToday.length}</span>
                       </div>
                     </div>
 
                     <div>
                       <div className="flex justify-between items-center text-xs font-sans mb-1">
-                        <span className="text-slate-600">Clients Greeted & Serviced</span>
-                        <span className="font-bold text-slate-900">14 / 20 standard</span>
-                      </div>
-                      <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                        <div className="bg-indigo-600 h-full rounded-full" style={{ width: "70%" }}></div>
+                        <span className="text-slate-600">Documents Notarised Today</span>
+                        <span className="font-bold text-slate-900">{myNotarisedToday.length}</span>
                       </div>
                     </div>
 
                     <div>
                       <div className="flex justify-between items-center text-xs font-sans mb-1">
-                        <span className="text-slate-600">Compliance Audit Check accuracy</span>
-                        <span className="font-bold text-emerald-600">100% Secure</span>
-                      </div>
-                      <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                        <div className="bg-emerald-600 h-full rounded-full" style={{ width: "100%" }}></div>
+                        <span className="text-slate-600">Unique Customers Served Today</span>
+                        <span className="font-bold text-slate-900">{myUniqueCustomersToday}</span>
                       </div>
                     </div>
                   </div>
 
-                  <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-[10px] text-blue-800 italic">
-                    💡 <b>Desk Target:</b> Biometric capture compliance is at 98.4%. Fingerprint integrity must always be committed prior to seal overlay execution.
-                  </div>
                 </div>
 
                 {/* Right: Notification Alerts Stream (5 columns) */}
@@ -1379,7 +1354,7 @@ export default function EmployeePortal({
                       </div>
                       <div>
                         <span className="block text-[8px] font-mono text-slate-400 uppercase">Date of Birth</span>
-                        <span className="font-mono text-slate-800 block">{selectedCust.dob || "1988-04-12"}</span>
+                        <span className="font-mono text-slate-800 block">{selectedCust.dob || "Not specified"}</span>
                       </div>
                       <div className="col-span-2 border-t border-slate-200 pt-2.5">
                         <span className="block text-[8px] font-mono text-slate-400 uppercase">Physical Address</span>
@@ -1387,41 +1362,22 @@ export default function EmployeePortal({
                       </div>
                     </div>
 
-                    {/* Integrated custom biometrics status */}
-                    <div className="grid grid-cols-2 gap-3.5 pt-1">
-                      <div className="p-3 border border-slate-200 rounded-xl flex items-center justify-between">
-                        <div>
-                          <span className="text-[10px] text-slate-500 block font-semibold">Fingerprint file</span>
-                          <span className={`text-[10px] font-bold ${selectedCust.fingerprintCaptured ? "text-emerald-600" : "text-amber-600"}`}>
-                            {selectedCust.fingerprintCaptured ? "Captured & Verified ✓" : "Scan Missing"}
-                          </span>
-                        </div>
-                        <Fingerprint className={`w-8 h-8 ${selectedCust.fingerprintCaptured ? "text-emerald-500" : "text-slate-350"}`} />
-                      </div>
-
-                      <div className="p-3 border border-slate-200 rounded-xl flex items-center justify-between">
-                        <div>
-                          <span className="text-[10px] text-slate-500 block font-semibold">Digital Signature</span>
-                          <span className={`text-[10px] font-bold ${selectedCust.signatureCaptured ? "text-emerald-600" : "text-amber-600"}`}>
-                            {selectedCust.signatureCaptured ? "Vector Saved ✓" : "Not Sealed"}
-                          </span>
-                        </div>
-                        <Sparkles className={`w-8 h-8 ${selectedCust.signatureCaptured ? "text-blue-500" : "text-slate-350"}`} />
-                      </div>
-                    </div>
-
-                    {/* Customer history list */}
+                    {/* Customer history — real data from the audit trail */}
                     <div className="space-y-2 pt-2">
-                      <span className="text-[10px] font-mono text-slate-400 block uppercase font-bold tracking-wider">Client Session Records History</span>
+                      <span className="text-[10px] font-mono text-slate-400 block uppercase font-bold tracking-wider">Document History</span>
                       <div className="space-y-1.5 max-h-[120px] overflow-y-auto pr-1">
-                        <div className="p-2 bg-slate-50 border border-slate-100 rounded text-[10.5px] font-sans flex justify-between">
-                          <span>Completed Power of Attorney Certification</span>
-                          <span className="font-mono text-slate-500">2026-06-12</span>
-                        </div>
-                        <div className="p-2 bg-slate-50 border border-slate-100 rounded text-[10.5px] font-sans flex justify-between">
-                          <span>Invoice INV-2026-001 ($120.00) Settled</span>
-                          <span className="font-mono text-emerald-600 font-bold">PAID</span>
-                        </div>
+                        {custHistoryLoading && (
+                          <p className="text-[10.5px] text-slate-400 italic">Loading…</p>
+                        )}
+                        {!custHistoryLoading && custHistory?.documents.length === 0 && (
+                          <p className="text-[10.5px] text-slate-400 italic">No documents on record.</p>
+                        )}
+                        {custHistory?.documents.map((doc, idx) => (
+                          <div key={idx} className="p-2 bg-slate-50 border border-slate-100 rounded text-[10.5px] font-sans flex justify-between">
+                            <span>{doc.doc_type.replace(/_/g, " ")} — {doc.document_number}</span>
+                            <span className="font-mono text-slate-500">{doc.status}</span>
+                          </div>
+                        ))}
                       </div>
                     </div>
 
@@ -1526,8 +1482,9 @@ export default function EmployeePortal({
                           <input
                             type="text"
                             required
-                            placeholder="e.g. Ahmed Ali, Elena Rostova"
+                            placeholder="e.g. Jane Doe, John Smith"
                             value={(newDoc as any)?.parties}
+                            onChange={(e) => (setNewDoc as any)((p: any) => ({ ...p, parties: e.target.value }))}
                             className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg outline-none text-slate-900"
                           />
                         </div>
@@ -1628,6 +1585,17 @@ export default function EmployeePortal({
                     />
                   </div>
 
+                  <div>
+                    <label className="block text-[9px] text-slate-500 font-mono mb-1 uppercase">Jurisdiction</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Somalia"
+                      value={qaParams.jurisdiction}
+                      onChange={(e) => setQaParams(p => ({ ...p, jurisdiction: e.target.value }))}
+                      className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg outline-none text-slate-900"
+                    />
+                  </div>
+
                   <button
                     type="button"
                     onClick={handleTriggerAIPowerBuilder}
@@ -1658,7 +1626,7 @@ export default function EmployeePortal({
             </div>
           )}
 
-          {/* TAB 7: BIOMETRICS CAPTURING LASER SUITE */}
+          {/* TAB 7: ID SCAN (OCR) & SIGNATURE PAD */}
           {activeTab === "biometrics" && (
             <div className="space-y-6">
               
@@ -1719,35 +1687,8 @@ export default function EmployeePortal({
 
               </div>
 
-              {/* Fingerprint Capture Workspace */}
+              {/* Signature Board and routing */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                
-                <div className="bg-white border border-slate-200 p-5 rounded-xl shadow-sm space-y-4">
-                  <span className="text-[10px] font-mono text-slate-400 block uppercase font-bold tracking-wider">Laser Fingerprint Scanner Workspace</span>
-                  
-                  <div className="bg-slate-50 border border-slate-200 py-6 rounded-xl flex flex-col items-center justify-center relative h-36">
-                    {propBioScanning && (
-                      <div className="absolute left-0 right-0 h-0.5 bg-blue-500 shadow-lg animate-bounce" style={{ top: `${propBioProgress}%` }}></div>
-                    )}
-                    <Fingerprint className={`w-12 h-12 ${propFingerprintReady ? "text-emerald-500" : propBioScanning ? "text-blue-500 animate-pulse" : "text-slate-450"}`} />
-                    <span className="block text-[9px] font-mono text-slate-450 mt-2">
-                      {propFingerprintReady ? "Fingerprint Status: Captured & Verified ✓" : propBioScanning ? `Scanning minutiae: ${propBioProgress}%` : "Device Idle. Connect scanner."}
-                    </span>
-                  </div>
-
-                  <div className="flex gap-2 text-xs">
-                    <button onClick={onTriggerFingerprintScan} className="flex-1 bg-slate-900 hover:bg-slate-800 text-white font-bold py-2 rounded-lg transition shadow-xs">
-                      Invoke Biometric Scan
-                    </button>
-                    {propFingerprintReady && (
-                      <button onClick={() => alert(`Saved hash ${propFingerHash} to registry.`)} className="px-4 py-2 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg transition font-bold">
-                        Save Record
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Signature Board and routing */}
                 <div className="bg-white border border-slate-200 p-5 rounded-xl shadow-sm space-y-4">
                   <div className="flex justify-between items-center">
                     <span className="text-[10px] font-mono text-slate-400 block uppercase font-bold">Signature pad</span>
@@ -1853,7 +1794,10 @@ export default function EmployeePortal({
 
                 {/* Daily Invoices Registry (7 columns) */}
                 <div className="md:col-span-7 bg-white border border-slate-200 p-5 rounded-xl shadow-sm space-y-4">
-                  <span className="text-[10px] font-mono text-slate-400 block uppercase font-bold tracking-wider">Clerk Station Local Invoicing Ledger</span>
+                  <div>
+                    <span className="text-[10px] font-mono text-slate-400 block uppercase font-bold tracking-wider">Local Invoicing Ledger</span>
+                    <p className="text-[9.5px] text-amber-600 mt-1">This ledger is local to your current session and isn't saved to company records — refreshing clears it.</p>
+                  </div>
                   
                   <div className="space-y-2.5 max-h-[220px] overflow-y-auto pr-1">
                     {localInvoices.map(inv => (
@@ -1877,7 +1821,7 @@ export default function EmployeePortal({
                           </div>
                         )}
                         {inv.status === "paid" && (
-                          <button onClick={() => alert(`Receipt INV-RE-009 printed for cash record. Signature: Elena Rostova.`)} className="bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 text-[11px] font-bold px-3 py-1.5 rounded transition">
+                          <button onClick={() => alert(`Receipt printed for ${inv.invoiceNumber} — ${inv.customer_name}, $${inv.amount.toFixed(2)}.`)} className="bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 text-[11px] font-bold px-3 py-1.5 rounded transition">
                             Print Cash Receipt
                           </button>
                         )}
