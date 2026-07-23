@@ -7,7 +7,6 @@ interface CompanyAdminDashboardProps {
   employees: Employee[];
   documents: NotaryDocument[];
   appointments: never[];
-  invoices: never[];
   onNavigateToTab: (tab: string) => void;
   userRole?: string;
 }

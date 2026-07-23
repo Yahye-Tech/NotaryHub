@@ -1,13 +1,12 @@
-type Invoice = { id: string; invoiceNumber?: string; customerName: string; amount: number; dueDate: string; status: string; items?: { description: string; price: number }[] };
 type Appointment = { id: string; branchId?: string; customerName: string; serviceType: string; appointmentTime: string; status: string; customerEmail?: string };
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { 
-  User, Calendar, Clock, CreditCard, ShieldCheck, Download, 
+  User, Calendar, Clock, ShieldCheck, Download, 
   QrCode, RefreshCw, CheckCircle, PlusCircle, XCircle, Trash2, 
   Plus, Search, FileText, Upload, MessageSquare, Settings, 
   Lock, Camera, Bell, BookOpen, HeartHandshake, HelpCircle, 
-  Send, Smartphone, Check, AlertCircle, Fingerprint, 
+  Send, Check, AlertCircle, Fingerprint, 
   Building, MapPin, ShieldAlert, ArrowRight, Printer, AlertTriangle, CheckSquare, Menu, X, Sun, Moon
 } from "lucide-react";
 import { Branch, NotaryDocument } from "../types";
@@ -45,8 +44,6 @@ interface CustomerPortalProps {
   appointments: Appointment[];
   onBookAppointment: (branchId: string, name: string, email: string, serviceType: string, time: string) => void;
   documents: NotaryDocument[];
-  invoices: never[];
-  onPayInvoice: (id: string) => void;
   onLogout: () => void;
 }
 
@@ -72,13 +69,11 @@ export default function CustomerPortal({
   appointments,
   onBookAppointment,
   documents,
-  invoices,
-  onPayInvoice,
   onLogout
 }: CustomerPortalProps) {
   // Sidebar state
   const [activeTab, setActiveTab] = useState<
-    "dashboard" | "appointments" | "documents" | "upload" | "payments" | "notifications" | "support" | "profile"
+    "dashboard" | "appointments" | "documents" | "upload" | "notifications" | "support" | "profile"
   >("dashboard");
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     return localStorage.getItem("portal-theme-customer-portal") === "dark";
@@ -207,14 +202,6 @@ export default function CustomerPortal({
       channel: "In-App",
       time: "Yesterday, 04:15 PM",
       unread: false
-    },
-    {
-      id: "not-03",
-      title: "Payment Invoice Settle Receipt",
-      text: "Payment of $25 received for invoice #INV-2026-00015. Copy dispatched to email.",
-      channel: "SMS",
-      time: "2 days ago",
-      unread: false
     }
   ]);
 
@@ -243,7 +230,7 @@ export default function CustomerPortal({
   const [ticketDescription, setTicketDescription] = useState("");
 
   const [supportChats, setSupportChats] = useState<{ sender: "user" | "operator", text: string; time: string }[]>([
-    { sender: "operator", text: "Hello! Welcome to Veritas Online Support Centre. How can we assist you with your notarization, invoice settlement, or queue check-in today?", time: "10:30 AM" }
+    { sender: "operator", text: "Hello! Welcome to Veritas Online Support Centre. How can we assist you with your notarization or queue check-in today?", time: "10:30 AM" }
   ]);
   const [supportInput, setSupportInput] = useState("");
 
@@ -268,11 +255,6 @@ export default function CustomerPortal({
 
   useEffect(() => { loadUploads(); }, [loadUploads]);
   const [isDragging, setIsDragging] = useState(false);
-
-  // NOTE: There is no real invoicing/billing backend yet (no per-transaction
-  // fee schema, no payment gateway integration). Rather than fabricate
-  // invoice data, we show an honest "not available" state below.
-  const allInvoices: Invoice[] = invoices;
 
   // AI Assistant Chat state
   const [aiAssistantPrompt, setAiAssistantPrompt] = useState("");
@@ -396,7 +378,7 @@ export default function CustomerPortal({
     setTimeout(() => {
       let botResponse = "Thank you for contacting Veritas Support. An operator of Chicago/Bosaso team has been alerted and will correspond shortly. Your reference slot ticket ID is: " + Math.floor(Math.random() * 900) + 100;
       if (userText.toLowerCase().includes("pay") || userText.toLowerCase().includes("invoice")) {
-        botResponse = "Understood. You can easily complete the invoice payments by visiting the 'Payments' module in your left navigation menu. We accept card processing powered safely by Stripe.";
+        botResponse = "Online billing isn't available yet. Please contact your branch directly for any outstanding fees.";
       } else if (userText.toLowerCase().includes("fingerprint") || userText.toLowerCase().includes("biometrics")) {
         botResponse = "If your biometrics status shows outstanding, please request the physical clerk at check-in counter to capture and upload your dual-hash fingerprint record.";
       }
@@ -686,20 +668,6 @@ export default function CustomerPortal({
               }`}
             >
               <Upload className="w-3.5 h-3.5" /> Upload ID & Bills
-            </button>
-
-            <button
-              onClick={() => { setActiveTab("payments"); setIsMobileMenuOpen(false); }}
-              className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-semibold transition flex items-center justify-between ${
-                activeTab === "payments" ? "bg-slate-150 text-slate-900 font-extrabold border-l-4 border-emerald-600 rounded-l-none" : "text-slate-600 hover:bg-slate-50"
-              }`}
-            >
-              <span className="flex items-center gap-2">
-                <CreditCard className="w-3.5 h-3.5" /> Payments Center
-              </span>
-              {allInvoices.some(i => i.status === "unpaid") && (
-                <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
-              )}
             </button>
 
             <button
@@ -1523,60 +1491,6 @@ export default function CustomerPortal({
                   </div>
                 </div>
 
-              </div>
-
-            </div>
-          )}
-
-          {/* SCREEN 5: PAYMENTS */}
-          {activeTab === "payments" && (
-            <div className="space-y-6">
-              
-              <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm space-y-4">
-                <div className="pb-3 border-b border-slate-150 flex items-center justify-between">
-                  <div>
-                    <span className="text-[10px] font-mono text-slate-400 block uppercase font-bold tracking-wider">Desk Invoices & Receipts</span>
-                    <p className="text-xs text-slate-500 font-medium">Settle fee outstanding logs using online secure gateway options</p>
-                  </div>
-                  <Smartphone className="w-5 h-5 text-slate-400" />
-                </div>
-
-                <div className="space-y-3 pt-1">
-                  {allInvoices.length === 0 ? (
-                    <div className="p-8 text-center text-xs text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                      Online billing isn't available yet. Please contact your branch for any outstanding fees.
-                    </div>
-                  ) : (
-                    allInvoices.map(inv => (
-                      <div key={inv.id} className="p-4 bg-slate-50 hover:bg-slate-100/30 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs select-none">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-extrabold text-slate-950 font-sans tracking-tight block text-sm">{inv.invoiceNumber}</span>
-                            <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-sans font-bold uppercase ${
-                              inv.status === "paid" ? "bg-emerald-50 border border-emerald-100 text-emerald-700" : "bg-amber-50 border border-amber-200 text-amber-700"
-                            }`}>{inv.status}</span>
-                          </div>
-                          <p className="text-[9.5px] text-slate-400 font-mono mt-0.5">Issued Due: {inv.dueDate}</p>
-                        </div>
-
-                        <div className="flex items-center gap-4 text-xs font-mono justify-between sm:justify-end">
-                          <div className="text-right">
-                            <span className="text-[10px] text-slate-400 block uppercase font-sans">TOTAL DUE</span>
-                            <span className="text-slate-900 font-bold font-sans text-sm">${inv.amount.toFixed(2)}</span>
-                          </div>
-                          {inv.status === "unpaid" && (
-                            <button
-                              onClick={() => onPayInvoice(inv.id)}
-                              className="bg-emerald-600 hover:bg-emerald-550 text-white font-bold py-2 px-4 rounded-xl transition shadow-xs"
-                            >
-                              Pay
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
               </div>
 
             </div>

@@ -35,8 +35,6 @@ interface CompanyAdminPortalProps {
   onToggleEmployeeStatus: (id: string) => void;
   onToggleEmployeeSuspend: (id: string) => void;
   onResetEmployeePassword: (id: string) => void;
-  invoices: never[];
-  onPayInvoice: (id: string) => void;
   appointments: never[];
   queue: QueueTicket[];
   documents: NotaryDocument[];
@@ -66,8 +64,6 @@ export default function CompanyAdminPortal({
   onToggleEmployeeStatus,
   onToggleEmployeeSuspend,
   onResetEmployeePassword,
-  invoices,
-  onPayInvoice,
   appointments,
   queue,
   documents,
@@ -116,7 +112,7 @@ export default function CompanyAdminPortal({
 
   // Brand customize states
   const [primaryColor, setPrimaryColor] = useState("#2563EB");
-  const [companyName, setCompanyName] = useState("Bosaso Notary Company Ltd.");
+  const [companyName, setCompanyName] = useState(activeTenant.name);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [complianceAuditLogs, setComplianceAuditLogs] = useState<AuditLogEntry[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
@@ -338,11 +334,12 @@ export default function CompanyAdminPortal({
 
   useEffect(() => {
     if (!selectedTenantId) return;
+    setCompanyName(activeTenant.name);
     settingsApi.get().then(res => {
       if (res.profile.primary_color) setPrimaryColor(res.profile.primary_color);
       if (res.profile.contact_name) setCompanyName(res.profile.contact_name);
     }).catch(() => {});
-  }, [selectedTenantId]);
+  }, [selectedTenantId, activeTenant.name]);
 
   useEffect(() => {
     if (activeTab !== "reports") return;
@@ -586,7 +583,7 @@ export default function CompanyAdminPortal({
         {/* TOP BAR / Header Area - with dynamic branch selectors, notifications, and AI toggle */}
         <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 mb-4 border-b border-slate-200 gap-4" id="portal-top-header">
           <div>
-            <h1 className="text-xl font-bold font-sans text-slate-950">Welcome back, Bosaso Notary Company</h1>
+            <h1 className="text-xl font-bold font-sans text-slate-950">Welcome back, {companyName}</h1>
             <p className="text-xs text-slate-500 font-sans mt-0.5">Here’s your company performance overview across all active bureaus</p>
           </div>
 
@@ -706,7 +703,6 @@ export default function CompanyAdminPortal({
               employees={localEmployees}
               documents={documents}
               appointments={appointments}
-              invoices={invoices}
               onNavigateToTab={(tab) => {
                 if (tab === "billing") setActiveTab("billing");
                 if (tab === "branches") setActiveTab("branches");

@@ -10,10 +10,11 @@ import {
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Legend, LineChart, Line } from "recharts";
 import { TenantForm, Modal, type TenantFormData } from "./FormComponents";
 import DynamicCharts from "./DynamicCharts";
-import { Tenant, Branch, Employee, QueueTicket, NotaryDocument, AuditLog } from "../types";
+import { Tenant, Branch, Employee, QueueTicket, NotaryDocument } from "../types";
 import PermissionsConfig, { PermissionsMatrix } from "./PermissionsConfig";
+import { auditApi, type AuditLogEntry } from "../api/settings.api";
+import { analyticsApi } from "../api/analytics.api";
 
-type Invoice = { id: string; invoiceNumber?: string; customerName: string; amount: number; dueDate: string; status: string; items?: { description: string; price: number }[] };
 type Appointment = { id: string; customerName: string; serviceType: string; appointmentTime: string; status: string };
 type MetricPoint = { label: string; value: number; change: number };
 
@@ -23,14 +24,13 @@ interface SuperAdminPortalProps {
   tenants: Tenant[];
   onAddTenant: (name: string, subdomain: string, plan: Tenant["plan"], email?: string, licenseNumber?: string) => void;
   onToggleTenantStatus: (id: string) => void;
+  onChangeTenantPlan: (id: string, plan: Tenant["plan"]) => void;
   onDeleteTenant: (id: string) => void;
   branches: Branch[];
   employees: Employee[];
   appointments: Appointment[];
   queue: QueueTicket[];
   documents: NotaryDocument[];
-  invoices: Invoice[];
-  auditLogs: AuditLog[];
   featureFlags: Record<string, boolean>;
   onToggleFeature: (flag: string) => void;
   onLogout: () => void;
@@ -42,14 +42,13 @@ export default function SuperAdminPortal({
   tenants,
   onAddTenant,
   onToggleTenantStatus,
+  onChangeTenantPlan,
   onDeleteTenant,
   branches,
   employees,
   appointments,
   queue,
   documents,
-  invoices,
-  auditLogs,
   featureFlags,
   onToggleFeature,
   onLogout,
@@ -83,16 +82,14 @@ export default function SuperAdminPortal({
   const [globalSearchTerm, setGlobalSearchTerm] = useState("");
   const [auditFilterCompany, setAuditFilterCompany] = useState("all");
   const [auditFilterSeverity, setAuditFilterSeverity] = useState("all");
-  const [supportTicketFilter, setSupportTicketFilter] = useState("all");
 
-  // Custom simulation notification alerts
-  const [alerts, setAlerts] = useState([
-    { id: "a-1", message: "New subscription registration: Somali Legal Solutions", date: "Just now", read: false },
-        { id: "a-3", message: "Security Warning: 3 failed compliance attempts from 182.16.89.4", date: "Yesterday", read: true }
-  ]);
+  // Notification alerts — derived from the real platform audit log once it loads (see effect below)
+  const [alerts, setAlerts] = useState<{ id: string; message: string; date: string; read: boolean }[]>([]);
   const [showNotificationDropdown, setShowNotificationDropdown] = useState(false);
 
-  // Platform setting details form values
+  // Platform setting form values — NOTE: there is no backend endpoint yet for platform-wide
+  // branding/gateway/SMTP config (settingsApi only covers per-tenant company profiles), so
+  // these fields are local-only and the save action does not persist anything server-side.
   const [platformName, setPlatformName] = useState("HubDev Notary SaaS");
   const [brandingColor, setBrandingColor] = useState("#2563EB");
   const [selectedGateway, setSelectedGateway] = useState("Stripe API Connect");
@@ -100,19 +97,44 @@ export default function SuperAdminPortal({
   const [smtpPort, setSmtpPort] = useState("587");
   const [platformSettingsSaved, setPlatformSettingsSaved] = useState(false);
 
-  // Dynamic system-level analytics catalog prices
-  const [plansList, setPlansList] = useState([
-    { code: "Basic", name: "Basic Plan", price: 299, activeCount: 1, revenue: 0, upgradeRate: "4.5%" },
-    { code: "Professional", name: "Professional Suite", price: 799, activeCount: 2, revenue: 0, upgradeRate: "12.2%" },
-    { code: "Enterprise", name: "Enterprise Dedicated", price: 1999, activeCount: 1, revenue: 0, upgradeRate: "35.8%" }
-  ]);
+  // Real platform-wide audit log (SUPER_ADMIN sees all tenants)
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
 
-  // Support ticket system database state
-  const [supportTickets, setSupportTickets] = useState([
-    { id: "S-102", company: "Bosaso Notary Services", type: "Payment", summary: "Requesting refund for workstation seat license downgrade", priority: "medium", status: "open", agent: "Elena Rostova" },
-    { id: "S-103", company: "Puntland Legal Bureau", type: "Access", summary: "Clerk credentials biometric terminal registration failed", priority: "high", status: "open", agent: "Elena Rostova" },
-    { id: "S-104", company: "Horn Africa Notary", type: "Company Issue", summary: "Subdomain SSL handshake routing timeout warning", priority: "high", status: "escalated", agent: "Sarah Jenkins" },
-    { id: "S-105", company: "Somali Legal Solutions", type: "Feature Request", summary: "Requesting additional custom PDF footer layout parameters", priority: "low", status: "resolved", agent: "Unassigned" }
+  useEffect(() => {
+    setAuditLoading(true);
+    auditApi.list({ limit: 50 })
+      .then(res => {
+        setAuditLogs(res.logs);
+        setAlerts(res.logs.slice(0, 5).map(log => ({
+          id: log.id,
+          message: `${log.action.replace(/_/g, " ")}${log.resource_label ? ` — ${log.resource_label}` : ""}`,
+          date: new Date(log.created_at).toLocaleString(),
+          read: false,
+        })));
+      })
+      .catch(() => { setAuditLogs([]); setAlerts([]); })
+      .finally(() => setAuditLoading(false));
+  }, []);
+
+  // Real platform overview stats (documents, employees, revenue) from the DB-backed analytics endpoint
+  const [platformOverview, setPlatformOverview] = useState<{ documentsTotal: number; documentsThisMonth: number; mrrDollars: number } | null>(null);
+
+  useEffect(() => {
+    analyticsApi.overview()
+      .then(res => setPlatformOverview({
+        documentsTotal: res.documents.total,
+        documentsThisMonth: res.documents.thisMonth,
+        mrrDollars: res.revenue.mrrDollars,
+      }))
+      .catch(() => setPlatformOverview(null));
+  }, []);
+
+  // Dynamic system-level analytics catalog prices (static business config, not fabricated analytics)
+  const [plansList, setPlansList] = useState([
+    { code: "Basic", name: "Basic Plan", price: 299, activeCount: 1, revenue: 0 },
+    { code: "Professional", name: "Professional Suite", price: 799, activeCount: 2, revenue: 0 },
+    { code: "Enterprise", name: "Enterprise Dedicated", price: 1999, activeCount: 1, revenue: 0 }
   ]);
 
   // AI chat state parameters
@@ -128,19 +150,15 @@ export default function SuperAdminPortal({
   const activeCompaniesCount = tenants.filter(t => t.status === "active").length;
   const suspendedCompaniesCount = tenants.filter(t => t.status === "suspended").length;
   const trialCompaniesCount = tenants.filter(t => t.status === "trial").length;
-  
-  // Platform billing calculations
-  const totalRevenueCollected = hasData ? (invoices.reduce((s, i) => i.status === "paid" ? s + i.amount : s, 0) + 4896) : invoices.reduce((s, i) => i.status === "paid" ? s + i.amount : s, 0); 
+
   const calculatedMRR = tenants.reduce((s, t) => {
     if (t.status !== "active") return s;
     const item = plansList.find(p => p.code === t.plan);
     return s + (item ? item.price : 799);
   }, 0);
 
-  // Activity numbers
-  const calculatedProcessedDocuments = hasData ? (documents.length + (tenants.length * 15) + 34) : documents.length;
-  const calculatedAppointmentsCount = hasData ? (appointments.length + 42) : appointments.length;
-  const dailyActiveUsers = hasData ? ((activeCompaniesCount * 8) + 12) : 0;
+  // Real document counts from the DB-backed analytics overview endpoint (no fabricated padding)
+  const calculatedProcessedDocuments = platformOverview ? platformOverview.documentsTotal : documents.length;
 
   // Sync pricing counts with master list whenever tenants array changes
   useEffect(() => {
@@ -186,22 +204,14 @@ export default function SuperAdminPortal({
     setActiveSubTab("companies");
   };
 
-  // Change Subscription Plan Handler
-  const changeCompanySubscription = (id: string, plan: Tenant["plan"]) => {
-    const updated = plansList.find(p => p.code === plan);
-    // Directly mutate local UI/Array representation or log
+  // Change Subscription Plan Handler — calls the real PATCH /api/tenants/:id endpoint
+  const changeCompanySubscription = async (id: string, plan: Tenant["plan"]) => {
     const tName = tenants.find(t => t.id === id)?.name || "Tenant";
-    alert(`Success: Upgraded license tier of ${tName} to ${plan} Plan! Monthly subscription charge revised.`);
-  };
-
-  // Reset Corporate access handler
-  const resetAccessTokens = (companyName: string) => {
-    alert(`🔐 Credentials Reset Issued!\nCustom white-label token credentials for ${companyName} have been wiped out. A secure administration setup link has been fired to verified compliance emails.`);
-  };
-
-  // Support Ticket actions
-  const manageTicketStatus = (id: string, nextStatus: string) => {
-    setSupportTickets(prev => prev.map(t => t.id === id ? { ...t, status: nextStatus } : t));
+    try {
+      await onChangeTenantPlan(id, plan);
+    } catch (err) {
+      alert(`Failed to change plan for ${tName}. Please try again.`);
+    }
   };
 
   // Execute interactive platform context feed to actual Gemini endpoint
@@ -219,12 +229,9 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
 - Active List: ${tenants.map(t => `${t.name} (Subdomain: ${t.subdomain}, Plan: ${t.plan}, Status: ${t.status})`).join("; ")}
 - Pricing Catalog Matrix: ${plansList.map(p => `${p.name} ($${p.price}/mo, Active: ${p.activeCount})`).join("; ")}
 - Financial MRR Run Rate: $${calculatedMRR.toLocaleString()}.00 / month
-- Total Revenue Collected: $${totalRevenueCollected.toLocaleString()}.00
-- Active Support Tickets: ${supportTickets.filter(t => t.status === "open").length} open cases
 - Office Bureaus count: ${branches.length} branches
 - Combined operational clerks: ${employees.length} employees
-- Signed documents recorded: ${calculatedProcessedDocuments} verified certificates
-- Daily active users: ${dailyActiveUsers} concurrent staff members
+- Signed documents recorded (all tenants): ${calculatedProcessedDocuments} certificates
     `;
 
     try {
@@ -244,22 +251,9 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
       const result = await response.json();
       setAiMessages(prev => [...prev, { role: "model", content: result.reply }]);
     } catch (err) {
-      // Fallback pre-calculated intelligence responses if offline
+      // Honest offline fallback — no fabricated figures. Only real, already-known values are used.
       setTimeout(() => {
-        let answer = "I apologize, my live server pipeline is temporarily recalibrating. For security, here is your quick administrative summary:\n\n";
-        if (userPromptText.includes("profitable")) {
-          answer += `Based on live metrics, the **Professional Suite ($799/mo)** is currently generating the maximum absolute revenue stream at **$1,598/mo** across your Active tenants list, representing **50% of subscriber footprints**.`;
-        } else if (userPromptText.includes("churn")) {
-          answer += `Current SaaS gross churn is maintained at a secure **0.0%**. However, **Horn Africa Notary (${plansList[0].name})** is currently flag-marked as **Suspended**. Action is advised to verify subscription payment links.`;
-        } else if (userPromptText.includes("inactive")) {
-          answer += `Audit trail flags identify **Somali Legal Solutions** and **Horn Africa Notary** as possessing minimal activity. Particularly, Horn Africa Notary has logged zero API signatures in the past 30 days due to suspension status.`;
-        } else if (userPromptText.includes("Predict")) {
-          answer += `Extrapolating active licensing pipelines forecasts next month SaaS MRR to scale to **$${(calculatedMRR * 1.15).toFixed(2)}** (+15.0%) driven by the onboarding sequence of Somali Legal Solutions into the Professional corporate tier.`;
-        } else if (userPromptText.includes("overloaded")) {
-          answer += `Global workload analytics indicate **Bosaso Main Branch** is operating on maximum load queues with **4 waiting clients** in the active queue, while Galkayo Witness Hub maintains only 1 waiting client. Re-allocating dynamic counters is recommended.`;
-        } else {
-          answer += `SaaS operational health scores remain at a high **98.2/100**. MRR is performing at $${calculatedMRR}.00 with absolute isolated data partitions maintained across all regional notary namespaces.`;
-        }
+        const answer = `I'm unable to reach the live intelligence pipeline right now, so I can't answer that in detail. Here's what I can confirm directly: ${tenants.length} registered companies, $${calculatedMRR.toLocaleString()}.00/mo MRR, ${branches.length} branches, ${employees.length} employees. Please try again shortly for a full analysis.`;
         setAiMessages(prev => [...prev, { role: "model", content: answer }]);
       }, 700);
     } finally {
@@ -272,9 +266,6 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
   const companyBranchesFiltered = branches.filter(b => b.tenant_id === selectedCompanyId);
   const companyBranchIds = companyBranchesFiltered.map(b => b.id);
   const companyEmployeesFiltered = employees.filter(e => companyBranchIds.includes(e.branch_id));
-  const companyInvoicesFiltered = selectedCompanyId === (tenants[0]?.id ?? "") 
-    ? invoices 
-    : invoices.filter(i => i.customerName.toLowerCase().includes("bosaso") || i.customerName.toLowerCase().includes(inspectedCompanyObj?.name.toLowerCase() || ""));
 
   return (
     <div id="super-admin-layout" className={`grid grid-cols-1 xl:grid-cols-12 gap-5 p-1 relative dark-portal-wrapper ${isDarkMode ? "dark" : ""}`}>
@@ -378,11 +369,6 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
                   {item.id === "companies" && (
                     <span className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded-full font-bold">
                       {tenants.length}
-                    </span>
-                  )}
-                  {item.id === "support" && (
-                    <span className="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.2 rounded-full font-bold">
-                      {supportTickets.filter(t => t.status === "open").length}
                     </span>
                   )}
                 </button>
@@ -551,30 +537,35 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
                 
                 {companyDetailTab === "overview" && (
                   <div className="space-y-4">
-                    {/* Health metrics bar */}
+                    {/* Real per-tenant snapshot (replaces a previous fake "health score" that never varied by company) */}
                     <div className="bg-white border border-slate-200 p-4 rounded-xl space-y-3.5 shadow-sm">
                       <div className="flex justify-between items-center">
-                        <h4 className="text-xs font-mono font-bold text-slate-400 uppercase tracking-wider">Company Health Score</h4>
-                        <span className="text-emerald-600 font-bold text-xs bg-emerald-50 px-2.5 py-0.5 rounded-full font-sans border border-emerald-150">A+ Stable</span>
+                        <h4 className="text-xs font-mono font-bold text-slate-400 uppercase tracking-wider">Company Snapshot</h4>
+                        <span className={`font-bold text-xs px-2.5 py-0.5 rounded-full font-sans border ${
+                          inspectedCompanyObj.status === "active"
+                            ? "text-emerald-600 bg-emerald-50 border-emerald-150"
+                            : inspectedCompanyObj.status === "trial"
+                            ? "text-amber-600 bg-amber-50 border-amber-150"
+                            : "text-rose-600 bg-rose-50 border-rose-150"
+                        }`}>{inspectedCompanyObj.status}</span>
                       </div>
-                      
-                      {/* Dynamic Health Scores indicators */}
+
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
                         <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-                          <span className="text-[9px] text-slate-400 block font-mono uppercase">Activity Level</span>
-                          <span className="text-xs font-extrabold text-slate-800 block mt-0.5">92% High</span>
+                          <span className="text-[9px] text-slate-400 block font-mono uppercase">Branches</span>
+                          <span className="text-xs font-extrabold text-slate-800 block mt-0.5">{companyBranchesFiltered.length}</span>
                         </div>
                         <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-                          <span className="text-[9px] text-slate-400 block font-mono uppercase">Revenue Index</span>
-                          <span className="text-xs font-extrabold text-slate-800 block mt-0.5">100% Solid</span>
+                          <span className="text-[9px] text-slate-400 block font-mono uppercase">Employees</span>
+                          <span className="text-xs font-extrabold text-slate-800 block mt-0.5">{companyEmployeesFiltered.length}</span>
                         </div>
                         <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-                          <span className="text-[9px] text-slate-400 block font-mono uppercase">Usage Load</span>
-                          <span className="text-xs font-extrabold text-slate-800 block mt-0.5">48.2 MB</span>
+                          <span className="text-[9px] text-slate-400 block font-mono uppercase">Monthly Plan Cost</span>
+                          <span className="text-xs font-extrabold text-slate-800 block mt-0.5">${(plansList.find(p => p.code === inspectedCompanyObj.plan)?.price ?? 799).toLocaleString()}</span>
                         </div>
                         <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-                          <span className="text-[9px] text-slate-400 block font-mono uppercase">Compliance</span>
-                          <span className="text-xs font-extrabold text-emerald-600 block mt-0.5">No Failures</span>
+                          <span className="text-[9px] text-slate-400 block font-mono uppercase">Recent Audit Events</span>
+                          <span className="text-xs font-extrabold text-slate-800 block mt-0.5">{auditLogs.filter(l => l.tenant_id === inspectedCompanyObj.id).length}</span>
                         </div>
                       </div>
                     </div>
@@ -601,14 +592,8 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
                         </div>
                       </div>
 
-                      {/* Credentials reset trigger */}
-                      <div className="pt-3.5 border-t border-slate-100 flex justify-end">
-                        <button
-                          onClick={() => resetAccessTokens(inspectedCompanyObj.name)}
-                          className="px-3 py-1.5 bg-white border border-slate-220 text-slate-700 hover:bg-slate-50 rounded-lg text-xs font-bold transition flex items-center gap-1.5"
-                        >
-                          <ShieldCheck className="w-3.5 h-3.5 text-blue-600" /> Administrative Access Reset
-                        </button>
+                      <div className="pt-3.5 border-t border-slate-100">
+                        <p className="text-[10px] text-slate-400 italic">Per-employee credential resets are available from the Company Admin's employee management screen.</p>
                       </div>
                     </div>
                   </div>
@@ -666,28 +651,17 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
 
                 {companyDetailTab === "billing" && (
                   <div className="bg-white border border-slate-200 p-4 rounded-xl space-y-3 shadow-sm">
-                    <h4 className="text-xs font-mono font-bold text-slate-400 uppercase">Assigned Invoices</h4>
-                    <div className="space-y-2">
-                      {companyInvoicesFiltered.map(invoice => (
-                        <div key={invoice.id} className="p-3 bg-slate-50 border border-slate-150 rounded-lg flex items-center justify-between text-xs text-slate-800 font-mono">
-                          <div>
-                            <span className="font-sans font-bold text-slate-900 block">{invoice.invoiceNumber}</span>
-                            <span className="text-slate-400 text-[9px]">Due on: {invoice.dueDate}</span>
-                          </div>
-                          <div className="text-right flex items-center gap-3">
-                            <span className="font-sans font-bold text-blue-600">${invoice.amount.toFixed(2)}</span>
-                            <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase border ${
-                              invoice.status === "paid" 
-                                ? "bg-emerald-50 text-emerald-700 border-emerald-150" 
-                                : "bg-red-50 text-red-700 border-red-150"
-                            }`}>{invoice.status}</span>
-                          </div>
-                        </div>
-                      ))}
-                      {companyInvoicesFiltered.length === 0 && (
-                        <div className="text-center py-6 text-slate-400 italic text-xs">No billable invoices found.</div>
-                      )}
+                    <h4 className="text-xs font-mono font-bold text-slate-400 uppercase">Subscription Billing</h4>
+                    <div className="p-3 bg-slate-50 border border-slate-150 rounded-lg flex items-center justify-between text-xs text-slate-800 font-mono">
+                      <div>
+                        <span className="font-sans font-bold text-slate-900 block">{inspectedCompanyObj.plan} Plan</span>
+                        <span className="text-slate-400 text-[9px]">Recurring monthly subscription</span>
+                      </div>
+                      <span className="font-sans font-bold text-blue-600">
+                        ${(plansList.find(p => p.code === inspectedCompanyObj.plan)?.price ?? 799).toLocaleString()}/mo
+                      </span>
                     </div>
+                    <p className="text-[10px] text-slate-400 italic pt-1">Per-transaction invoicing isn't implemented yet — only subscription-level billing is tracked.</p>
                   </div>
                 )}
 
@@ -819,13 +793,13 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
                   </div>
                   <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm text-center transform transition hover:scale-[1.01]">
                     <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Lobby Appointments Completed</span>
-                    <span className="text-2xl font-bold text-slate-800 block mt-1.5 font-sans leading-none">{calculatedAppointmentsCount} Meetings</span>
-                    <span className="text-[9px] text-slate-400 block mt-1.5 italic">Average waiting: ~10.5 minutes</span>
+                    <span className="text-2xl font-bold text-slate-400 block mt-1.5 font-sans leading-none">Not tracked</span>
+                    <span className="text-[9px] text-slate-400 block mt-1.5 italic">Platform-wide appointment analytics aren't built yet</span>
                   </div>
                   <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm text-center transform transition hover:scale-[1.01]">
                     <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Daily Active Users</span>
-                    <span className="text-2xl font-bold text-slate-800 block mt-1.5 font-sans leading-none">{dailyActiveUsers} Clerks</span>
-                    <span className="text-[9px] text-slate-400 block mt-1.5 italic">Unified administrative sessions</span>
+                    <span className="text-2xl font-bold text-slate-400 block mt-1.5 font-sans leading-none">Not tracked</span>
+                    <span className="text-[9px] text-slate-400 block mt-1.5 italic">Session-level activity analytics aren't built yet</span>
                   </div>
                 </div>
 
@@ -1137,89 +1111,55 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
             )}
 
             {/* ========================================== */}
-            {/* VIEW 4: PLATFORM REVENUE BILLING (Stripe) */}
+            {/* VIEW 4: PLATFORM REVENUE BILLING */}
             {/* ========================================== */}
             {activeSubTab === "billing" && (
               <div className="space-y-4" id="saas-view-billing">
                 {/* Billing Summary scores */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm">
-                    <span className="text-[10px] font-mono text-slate-400 font-bold uppercase block">Total Net Revenue</span>
-                    <span className="text-xl font-bold font-sans text-slate-900 mt-1 block">${totalRevenueCollected.toLocaleString()}.00</span>
-                    <span className="text-[9px] text-emerald-600 font-bold mt-1 block">✓ All transfers cleared</span>
-                  </div>
-                  <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm">
-                    <span className="text-[10px] font-mono text-slate-400 font-bold uppercase block">Monthly Recurring (MRR)</span>
+                    <span className="text-[10px] font-mono text-slate-400 font-bold uppercase block">Monthly Recurring Revenue (MRR)</span>
                     <span className="text-xl font-bold font-sans text-blue-600 mt-1 block">${calculatedMRR.toLocaleString()}.00</span>
-                    <span className="text-[9px] text-slate-500 mt-1 block">Forecasted run rate</span>
+                    <span className="text-[9px] text-slate-500 mt-1 block">Derived from active tenant subscription plans</span>
                   </div>
                   <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm">
-                    <span className="text-[10px] font-mono text-slate-400 font-bold uppercase block">Gross Churn Rate</span>
-                    <span className="text-xl font-bold font-sans text-slate-900 mt-1 block">0.05%</span>
-                    <span className="text-[9px] text-emerald-600 font-bold mt-1 block">Lowest industry tier</span>
-                  </div>
-                  <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm">
-                    <span className="text-[10px] font-mono text-slate-400 font-bold uppercase block">Outstanding invoices</span>
-                    <span className="text-xl font-bold font-sans text-rose-600 mt-1 block">{invoices.filter(i => i.status === "unpaid").length} invoices</span>
-                    <span className="text-[9px] text-slate-400 mt-1 block">Awaiting client payment</span>
+                    <span className="text-[10px] font-mono text-slate-400 font-bold uppercase block">Active Subscriptions</span>
+                    <span className="text-xl font-bold font-sans text-slate-900 mt-1 block">{activeCompaniesCount} companies</span>
+                    <span className="text-[9px] text-slate-500 mt-1 block">{suspendedCompaniesCount} suspended · {trialCompaniesCount} on trial</span>
                   </div>
                 </div>
 
-                {/* Subsections billing dispatch */}
-                <div className="bg-white border border-slate-200 p-4 rounded-2xl flex flex-wrap gap-2.5 justify-between items-center shadow-sm">
-                  <div className="space-y-0.5">
-                    <h4 className="text-xs font-mono font-bold text-slate-800 uppercase">Billing automation hub</h4>
-                    <p className="text-[11px] text-slate-500">Generate or refund corporate licenses connected with financial gateways.</p>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => alert("Billing gateway synchronisation initialized with Stripe servers.")}
-                      className="px-3.5 py-1.5 bg-white hover:bg-slate-50 border border-slate-220 rounded-xl text-xs font-bold text-slate-700 transition"
-                    >
-                      Sync Stripe Gateway
-                    </button>
-                    <button
-                      onClick={() => alert(`Corporate billing records dispatched into local file format: CSV`)}
-                      className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition shadow-xs"
-                    >
-                      Export SaaS Receipts
-                    </button>
-                  </div>
+                <div className="bg-white border border-dashed border-slate-200 rounded-2xl p-8 text-center">
+                  <p className="text-xs text-slate-500 font-semibold">Per-transaction invoicing and a payment gateway integration aren't built yet.</p>
+                  <p className="text-[10.5px] text-slate-400 mt-1.5">Only subscription-tier MRR is tracked (above). Churn rate, invoice records, and gateway sync will appear here once that backend exists.</p>
                 </div>
 
-                {/* Dynamic invoices table */}
                 <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm text-xs">
                   <div className="p-3.5 bg-slate-50 border-b border-slate-100 font-mono text-[10px] font-light uppercase tracking-wider text-slate-400">
-                    Platform Master Receipts Spreadsheet
+                    Subscription Plan Breakdown
                   </div>
                   <div className="overflow-x-auto font-mono text-[11px]">
                     <table className="w-full text-left border-collapse whitespace-nowrap">
                       <thead>
                         <tr className="border-b border-slate-100 bg-slate-50 text-[9px] uppercase text-slate-400">
-                          <th className="p-3.5 font-bold">Invoice ID</th>
-                          <th className="p-3.5 font-bold">Target Company</th>
-                          <th className="p-3.5 font-bold">Amount Due</th>
-                          <th className="p-3.5 font-bold">Payment Status</th>
-                          <th className="p-3.5 font-bold">Date Limit</th>
+                          <th className="p-3.5 font-bold">Plan</th>
+                          <th className="p-3.5 font-bold">Price / mo</th>
+                          <th className="p-3.5 font-bold">Active Tenants</th>
+                          <th className="p-3.5 font-bold">Revenue / mo</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {invoices.map((inv, idx) => (
-                          <tr key={inv.id || idx} className="hover:bg-slate-50/50">
-                            <td className="p-3.5 font-bold text-slate-900">{inv.invoiceNumber}</td>
-                            <td className="p-3.5 font-sans font-medium text-slate-650">{inv.customerName}</td>
-                            <td className="p-3.5 font-bold text-blue-600">${inv.amount.toFixed(2)}</td>
-                            <td className="p-3.5">
-                              <span className={`px-2 py-0.5 rounded text-[9px] font-sans font-bold uppercase border ${
-                                inv.status === "paid" 
-                                  ? "bg-emerald-50 text-emerald-700 border-emerald-150" 
-                                  : "bg-red-50 text-red-700 border-red-150"
-                              }`}>{inv.status}</span>
-                            </td>
-                            <td className="p-3.5 text-slate-500">{inv.dueDate}</td>
-                          </tr>
-                        ))}
+                        {plansList.map((p) => {
+                          const activeCount = tenants.filter(t => t.plan === p.code && t.status === "active").length;
+                          return (
+                            <tr key={p.code} className="hover:bg-slate-50/50">
+                              <td className="p-3.5 font-bold text-slate-900">{p.name}</td>
+                              <td className="p-3.5 font-sans font-medium text-slate-650">${p.price.toLocaleString()}</td>
+                              <td className="p-3.5">{activeCount}</td>
+                              <td className="p-3.5 font-bold text-blue-600">${(activeCount * p.price).toLocaleString()}</td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1246,87 +1186,11 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
                     <h3 className="text-xs font-mono font-bold text-slate-450 uppercase tracking-wider">Super Admin Support Center</h3>
                     <p className="text-xs text-slate-500 mt-1">Resolve outstanding client tickets and assign experts</p>
                   </div>
-
-                  {/* Filter tabs */}
-                  <div className="flex gap-1.5 bg-slate-50 p-1 rounded-xl border border-slate-200 text-xs font-medium">
-                    {["all", "open", "resolved"].map(st => (
-                      <button
-                        key={st}
-                        onClick={() => setSupportTicketFilter(st)}
-                        className={`px-3 py-1.5 rounded-lg transition uppercase font-mono text-[9.5px] ${
-                          supportTicketFilter === st 
-                            ? "bg-white text-blue-600 font-extrabold shadow-sm" 
-                            : "text-slate-505 hover:text-slate-800"
-                        }`}
-                      >
-                        {st}
-                      </button>
-                    ))}
-                  </div>
                 </div>
 
-                {/* Ticket cards layout list */}
-                <div className="space-y-3.5">
-                  {supportTickets
-                    .filter(t => supportTicketFilter === "all" || t.status === supportTicketFilter)
-                    .map(ticket => (
-                      <div key={ticket.id} className="bg-white border border-slate-220 p-4.5 rounded-2xl flex flex-col md:flex-row justify-between gap-4 shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] hover:border-slate-350 transition">
-                        <div className="space-y-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-[10px] font-mono text-slate-400 font-extrabold">#{ticket.id}</span>
-                            <span className="text-xs font-black text-slate-900 font-sans">{ticket.company}</span>
-                            <span className="px-1.5 py-0.2 bg-slate-100 text-slate-650 text-[9px] uppercase font-bold rounded">{ticket.type}</span>
-                            <span className={`px-2 py-0.2 text-[9px] font-mono rounded-full font-bold uppercase border ${
-                              ticket.priority === "high" 
-                                ? "bg-red-50 text-red-700 border-red-200" 
-                                : ticket.priority === "medium"
-                                ? "bg-amber-50 text-amber-700 border-amber-250"
-                                : "bg-slate-100 text-slate-700 border-slate-200"
-                            }`}>{ticket.priority} priority</span>
-                          </div>
-                          
-                          <p className="text-xs text-slate-650 leading-relaxed font-sans mt-1">{ticket.summary}</p>
-                          <div className="text-[10px] text-slate-400 font-mono">Assigned Staff Specialist: {ticket.agent}</div>
-                        </div>
-
-                        {/* Status/Actions column */}
-                        <div className="flex flex-row md:flex-col justify-between items-end gap-2.5 shrink-0 self-center">
-                          <span className={`text-[10px] font-mono font-black uppercase ${
-                            ticket.status === "open" 
-                              ? "text-amber-600" 
-                              : ticket.status === "resolved" 
-                              ? "text-emerald-600" 
-                              : "text-red-600 animate-pulse"
-                          }`}>{ticket.status}</span>
-                          
-                          <div className="flex gap-1.5">
-                            {ticket.status !== "resolved" ? (
-                              <>
-                                <button
-                                  onClick={() => manageTicketStatus(ticket.id, "resolved")}
-                                  className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-850 rounded-lg text-[10.5px] font-bold tracking-tight transition"
-                                >
-                                  Resolve ticket
-                                </button>
-                                <button
-                                  onClick={() => manageTicketStatus(ticket.id, "escalated")}
-                                  className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-red-750 rounded-lg text-[10.5px] font-bold tracking-tight transition"
-                                >
-                                  Escalate
-                                </button>
-                              </>
-                            ) : (
-                              <button
-                                onClick={() => manageTicketStatus(ticket.id, "open")}
-                                className="px-2.5 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-[10.5px] font-bold transition"
-                              >
-                                Re-open case
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                <div className="bg-white border border-dashed border-slate-200 rounded-2xl p-8 text-center">
+                  <p className="text-xs text-slate-500 font-semibold">A support ticket system hasn't been built yet.</p>
+                  <p className="text-[10.5px] text-slate-400 mt-1.5">This panel will show real client tickets once a ticketing backend exists. Right now there's nothing to display rather than placeholder data.</p>
                 </div>
               </div>
             )}
@@ -1442,9 +1306,11 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
 
                 <div className="bg-white border border-slate-200 p-5 rounded-2xl relative shadow-sm">
                   
+                  <p className="text-[10px] text-amber-600 mb-3 font-semibold">Note: there's no backend endpoint yet for platform-wide branding/gateway/SMTP settings — these fields are local to this screen only and nothing is saved server-side.</p>
+
                   {platformSettingsSaved && (
-                    <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-800 text-xs font-bold rounded-lg mb-4 flex items-center gap-2 animate-fade-in" id="settings-save-lbl">
-                      <CheckCircle className="w-4 h-4 text-emerald-600" /> Veritas Global parameters synchronized and recorded successfully in Tenant registry store!
+                    <div className="p-3 bg-slate-50 border border-slate-200 text-slate-700 text-xs font-bold rounded-lg mb-4 flex items-center gap-2 animate-fade-in" id="settings-save-lbl">
+                      <CheckCircle className="w-4 h-4 text-slate-500" /> Form values updated locally — not yet persisted to a backend.
                     </div>
                   )}
 

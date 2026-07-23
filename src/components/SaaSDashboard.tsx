@@ -460,6 +460,11 @@ export default function SaaSDashboard() {
     setTenants(prev => prev.map(t => t.id === id ? res.tenant : t));
   }, [tenants]);
 
+  const handleChangeTenantPlan = useCallback(async (id: string, plan: Tenant["plan"]) => {
+    const res = await tenantsApi.update(id, { plan });
+    setTenants(prev => prev.map(t => t.id === id ? res.tenant : t));
+  }, []);
+
   const handleDeleteTenant = useCallback(async (id: string) => {
     await tenantsApi.delete(id);
     setTenants(prev => prev.filter(t => t.id !== id));
@@ -731,14 +736,13 @@ export default function SaaSDashboard() {
             tenants={tenants}
             onAddTenant={handleAddTenant}
             onToggleTenantStatus={handleToggleTenantStatus}
+            onChangeTenantPlan={handleChangeTenantPlan}
             onDeleteTenant={handleDeleteTenant}
             branches={branches}
             employees={employees}
             appointments={[]}
             queue={[]}
             documents={[]}
-            invoices={[]}
-            auditLogs={[]}
             featureFlags={featureFlags}
             onToggleFeature={handleToggleFeature}
             onLogout={handleLogout}
@@ -765,8 +769,6 @@ export default function SaaSDashboard() {
             onToggleEmployeeStatus={handleToggleEmployeeStatus}
             onToggleEmployeeSuspend={handleToggleEmployeeSuspend}
             onResetEmployeePassword={handleResetEmployeePassword}
-            invoices={[]}
-            onPayInvoice={() => {}}
             appointments={[]}
             queue={[]}
             documents={[]}
@@ -822,8 +824,6 @@ export default function SaaSDashboard() {
             appointments={[]}
             onBookAppointment={() => {}}
             documents={[]}
-            invoices={[]}
-            onPayInvoice={() => {}}
             onLogout={handleLogout}
           />
         );

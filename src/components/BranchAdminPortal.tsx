@@ -142,11 +142,7 @@ export default function BranchAdminPortal({
 
   const [customers, setCustomers] = useState<AdminCustomer[]>([]);
 
-  const [notifications, setNotifications] = useState([
-    { id: "not-1", type: "system", title: "New Employee Created", details: "Warsame Duale was added to Counter 3. System profile generated.", date: "Today, 08:00 AM" },
-    { id: "not-2", type: "success", title: "Document Approved", details: "Power of Attorney (DOC-00123) digitally signed and watermarked.", date: "Today, 09:15 AM" },
-    { id: "not-3", type: "alert", title: "Queue Overflow Warning", details: "Waiting queue exceeded SLA threshold of 5 clients in Bosaso.", date: "Yesterday, 04:00 PM" },
-  ]);
+  const [notifications, setNotifications] = useState<{ id: string; type: string; title: string; details: string; date: string }[]>([]);
 
   // AI assistant states
   const [aiPrompt, setAiPrompt] = useState("");
@@ -166,15 +162,24 @@ export default function BranchAdminPortal({
 
   // Settings state
   const [settings, setSettings] = useState({
-    branchName: "Bosaso Main Branch",
-    branchPhone: "+252 90 779 1234",
-    branchEmail: "bosaso.admin@veritas.so",
+    branchName: activeBranch.name,
+    branchPhone: activeBranch.phone || "",
+    branchEmail: "",
     hoursStart: "08:00 AM",
     hoursEnd: "05:00 PM",
     workingDays: "Saturday - Thursday",
     queueRules: "SLA wait limit 15 minutes. Call notification sounds enabled.",
     appointmentRules: "Walk-ins permitted only on Wednesdays. Double bookings restricted."
   });
+
+  // Keep settings display in sync with the real branch record once it loads/changes
+  useEffect(() => {
+    setSettings(prev => ({
+      ...prev,
+      branchName: activeBranch.name,
+      branchPhone: activeBranch.phone || prev.branchPhone,
+    }));
+  }, [activeBranch.name, activeBranch.phone]);
 
   // Selected entities for focus popovers/modals
   const [selectedCustomer, setSelectedCustomer] = useState<AdminCustomer | null>(null);
