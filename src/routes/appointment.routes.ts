@@ -14,6 +14,7 @@ import {
   type AppointmentStatus,
 } from "../services/appointment.service.js";
 import { writeAuditLog } from "../auth/auth.service.js";
+import { createNotification, createNotificationForUsers, getCustomerUserId, getBranchAdminUserIds } from "../services/notification.service.js";
 import { query } from "../db/pool.js";
 
 const router = Router();
@@ -165,6 +166,7 @@ router.post("/", requireAuth, requireMinRole("CUSTOMER"), [
       endTime: req.body.endTime,
       notes: req.body.notes,
       bookedBy: req.user!.sub,
+      bookedByRole: req.user!.role,
     });
 
     await writeAuditLog({
@@ -173,6 +175,22 @@ router.post("/", requireAuth, requireMinRole("CUSTOMER"), [
       action: "APPOINTMENT_CREATED",
       meta: { appointmentId: appointment.id, branchId: appointment.branch_id },
     });
+
+    (async () => {
+      try {
+        const branchAdminIds = await getBranchAdminUserIds(appointment.branch_id);
+        await createNotificationForUsers(branchAdminIds, {
+          tenantId,
+          type: "info",
+          title: "New appointment booked",
+          body: `${appointment.customer_name} booked a ${appointment.service_type} appointment.`,
+          resourceType: "appointment",
+          resourceId: appointment.id,
+        });
+      } catch (notifErr: any) {
+        console.error("[Notifications] Appointment create notify error:", notifErr.message);
+      }
+    })();
 
     res.status(201).json({ message: "Appointment created", appointment });
   } catch (err: any) {
@@ -300,6 +318,48 @@ router.post("/:id/transition", requireAuth, requireMinRole("CUSTOMER"), [
       action: "APPOINTMENT_STATUS_CHANGED",
       meta: { appointmentId: appointment.id, status: appointment.status },
     });
+
+    (async () => {
+      try {
+        if (req.user!.role === "CUSTOMER") {
+          // Customer cancelled — let branch admins know
+          const branchAdminIds = await getBranchAdminUserIds(appointment.branch_id);
+          await createNotificationForUsers(branchAdminIds, {
+            tenantId,
+            type: "warning",
+            title: "Appointment cancelled by customer",
+            body: `${appointment.customer_name} cancelled their ${appointment.service_type} appointment.`,
+            resourceType: "appointment",
+            resourceId: appointment.id,
+          });
+        } else {
+          // Staff changed the status — let the customer know, if they have portal access
+          const statusMessages: Record<string, { title: string; body: string; type: "info" | "success" | "warning" }> = {
+            confirmed:  { title: "Appointment confirmed", body: `Your ${appointment.service_type} appointment has been confirmed.`, type: "success" },
+            cancelled:  { title: "Appointment cancelled", body: `Your ${appointment.service_type} appointment has been cancelled.`, type: "warning" },
+            completed:  { title: "Appointment completed", body: `Your ${appointment.service_type} appointment is complete.`, type: "success" },
+            no_show:    { title: "Marked as no-show", body: `Your ${appointment.service_type} appointment was marked as a no-show.`, type: "warning" },
+          };
+          const msg = statusMessages[appointment.status];
+          if (msg) {
+            const customerUserId = await getCustomerUserId(appointment.customer_id);
+            if (customerUserId) {
+              await createNotification({
+                userId: customerUserId,
+                tenantId,
+                type: msg.type,
+                title: msg.title,
+                body: msg.body,
+                resourceType: "appointment",
+                resourceId: appointment.id,
+              });
+            }
+          }
+        }
+      } catch (notifErr: any) {
+        console.error("[Notifications] Appointment transition notify error:", notifErr.message);
+      }
+    })();
 
     res.json({ message: "Status updated", appointment });
   } catch (err: any) {

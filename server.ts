@@ -25,6 +25,7 @@ import auditRoutes from "./src/routes/audit.routes.js";
 import appointmentRoutes from "./src/routes/appointment.routes.js";
 import queueRoutes from "./src/routes/queue.routes.js";
 import uploadRoutes from "./src/routes/upload.routes.js";
+import notificationRoutes from "./src/routes/notification.routes.js";
 
 // ─── RBAC middleware (for protecting existing routes) ─────────────────────
 import { requireAuth, requireMinRole } from "./src/middleware/auth.middleware.js";
@@ -78,6 +79,7 @@ app.use("/api/audit-logs", auditRoutes);
 app.use("/api/appointments", appointmentRoutes);
 app.use("/api/queue", queueRoutes);
 app.use("/api/uploads", uploadRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 // ─── Gemini AI client ─────────────────────────────────────────────────────
 const ai = new GoogleGenAI({
@@ -245,11 +247,15 @@ async function startServer() {
   }
 
   // 2. Initialize email service
-  try {
-    await initEmailService();
-  } catch (err: any) {
-    console.error("[Email] SMTP init failed:", err.message);
-    // Non-fatal in dev — log and continue
+  if (process.env.TEST_SKIP_EMAIL_INIT === "true") {
+    console.log("[Email] Skipped (TEST_SKIP_EMAIL_INIT=true) — test/CI mode only.");
+  } else {
+    try {
+      await initEmailService();
+    } catch (err: any) {
+      console.error("[Email] SMTP init failed:", err.message);
+      // Non-fatal in dev — log and continue
+    }
   }
 
   // 3. Vite dev middleware or static production build

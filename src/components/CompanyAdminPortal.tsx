@@ -17,6 +17,7 @@ import CompanyAdminDocuments from "./company/CompanyAdminDocuments";
 import CompanyAdminAppointments from "./company/CompanyAdminAppointments";
 import CompanyAdminBilling from "./company/CompanyAdminBilling";
 import { settingsApi, auditApi, type AuditLogEntry } from "../api/settings.api";
+import { notificationsApi } from "../api/notifications.api";
 import { ApiException, getAccessToken } from "../api/client";
 
 interface CompanyAdminPortalProps {
@@ -93,21 +94,26 @@ export default function CompanyAdminPortal({
   // Right AI Assistant sidebar state
   const [showRightPanel, setShowRightPanel] = useState(false);
 
-  // Notifications dropdown — populated from the real audit log
+  // Notifications dropdown — populated from the real notifications system
   const [showNotificationList, setShowNotificationList] = useState(false);
   const [notifications, setNotifications] = useState<{ id: string; text: string; time: string; read: boolean }[]>([]);
 
   useEffect(() => {
-    auditApi.list({ limit: 5 })
-      .then(res => {
-        setNotifications(res.logs.map(log => ({
-          id: log.id,
-          text: `${log.action.replace(/_/g, " ")}${log.resource_label ? ` — ${log.resource_label}` : ""}`,
-          time: new Date(log.created_at).toLocaleString(),
-          read: false,
-        })));
-      })
-      .catch(() => setNotifications([]));
+    const loadNotifications = () => {
+      notificationsApi.list({ limit: 10 })
+        .then(res => {
+          setNotifications(res.notifications.map(n => ({
+            id: n.id,
+            text: `${n.title} — ${n.body}`,
+            time: new Date(n.created_at).toLocaleString(),
+            read: n.is_read,
+          })));
+        })
+        .catch(() => setNotifications([]));
+    };
+    loadNotifications();
+    const interval = setInterval(loadNotifications, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   // Brand customize states
@@ -641,7 +647,10 @@ export default function CompanyAdminPortal({
                     </div>
                     {notifications.length > 0 && (
                       <button 
-                        onClick={() => setNotifications([])}
+                        onClick={async () => {
+                          try { await notificationsApi.markAllRead(); } catch { /* non-fatal */ }
+                          setNotifications([]);
+                        }}
                         className="text-[10.5px] text-indigo-600 hover:text-indigo-750 hover:underline font-bold outline-none cursor-pointer transition"
                       >
                         Clear all

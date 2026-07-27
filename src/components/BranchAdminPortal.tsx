@@ -13,6 +13,7 @@ import { appointmentsApi, formatAppointmentDisplayTime } from "../api/appointmen
 import { queueApi } from "../api/queue.api";
 import { analyticsApi, BranchReport } from "../api/analytics.api";
 import { auditApi, AuditLogEntry } from "../api/settings.api";
+import { notificationsApi } from "../api/notifications.api";
 import { getAccessToken, ApiException } from "../api/client";
 
 interface BranchAdminPortalProps {
@@ -143,6 +144,32 @@ export default function BranchAdminPortal({
   const [customers, setCustomers] = useState<AdminCustomer[]>([]);
 
   const [notifications, setNotifications] = useState<{ id: string; type: string; title: string; details: string; date: string }[]>([]);
+
+  const loadRealNotifications = useCallback(async () => {
+    try {
+      const res = await notificationsApi.list({ limit: 30 });
+      const serverItems = res.notifications.map(n => ({
+        id: n.id,
+        type: n.type,
+        title: n.title,
+        details: n.body,
+        date: new Date(n.created_at).toLocaleString(),
+      }));
+      setNotifications(prev => {
+        // Keep any purely-local, just-fired items (non-UUID ids) that haven't been superseded, merged ahead of real ones
+        const localOnly = prev.filter(p => !/^[0-9a-f-]{36}$/i.test(p.id));
+        return [...localOnly, ...serverItems];
+      });
+    } catch (err) {
+      console.error("[BranchAdminPortal] Failed to load notifications:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadRealNotifications();
+    const interval = setInterval(loadRealNotifications, 30000);
+    return () => clearInterval(interval);
+  }, [loadRealNotifications]);
 
   // AI assistant states
   const [aiPrompt, setAiPrompt] = useState("");
@@ -1939,13 +1966,17 @@ export default function BranchAdminPortal({
                     <p className="text-xs text-slate-500 mt-0.5">Branch created events, document statuses, queue overflow, appointment changes, customer logs</p>
                   </div>
                   <button 
-                    onClick={() => {
-                      setNotifications([]);
-                      alert("Audit events cleared.");
+                    onClick={async () => {
+                      try {
+                        await notificationsApi.markAllRead();
+                      } catch (err) {
+                        console.error("[BranchAdminPortal] Failed to mark notifications read:", err);
+                      }
+                      setNotifications(prev => prev.filter(p => !/^[0-9a-f-]{36}$/i.test(p.id)));
                     }}
                     className="text-slate-500 hover:underline font-bold text-xs"
                   >
-                    Clear All
+                    Mark All Read
                   </button>
                 </div>
 
@@ -1983,7 +2014,7 @@ export default function BranchAdminPortal({
 
                 <form onSubmit={(e) => {
                   e.preventDefault();
-                  alert("✓ Branch configurations saved successfully on the SaaS cloud database!");
+                  alert("Settings updated locally. Note: these fields aren't wired to a save endpoint yet, so they won't persist after refresh.");
                   setNotifications(prev => [
                     { id: Date.now().toString(), type: "system", title: "Configuration Updated", details: "Branch Name, hours, and SLA rules saved.", date: "Just now" },
                     ...prev

@@ -15,6 +15,7 @@ import { uploadsApi, toUiUploadedFile } from "../api/uploads.api";
 import { documentsApi } from "../api/documents.api";
 import { ApiException, getAccessToken } from "../api/client";
 import { authApi } from "../api/auth.api";
+import { notificationsApi } from "../api/notifications.api";
 
 function formatDocumentStatusLabel(status: string): string {
   return status.replace(/_/g, " ").replace(/-/g, " ");
@@ -185,25 +186,8 @@ export default function CustomerPortal({
   const [bookingDate, setBookingDate] = useState("2026-06-25");
   const [bookingTime, setBookingTime] = useState("10:00 AM");
 
-  // Notifications Stream
-  const [notifications, setNotifications] = useState([
-    {
-      id: "not-01",
-      title: "Appointment Spark Confirmed",
-      text: "Your booking for 25 June 2026 at Bosaso Main Branch has been approved by the Registrar.",
-      channel: "Email",
-      time: "Today, 10:22 AM",
-      unread: true
-    },
-    {
-      id: "not-02",
-      title: "Document Verified & Ready",
-      text: "Power of Attorney (DOC-2026-00123) watermarked and published into secure digital vault.",
-      channel: "In-App",
-      time: "Yesterday, 04:15 PM",
-      unread: false
-    }
-  ]);
+  // Notifications Stream — starts empty and is populated from the real notifications API below
+  const [notifications, setNotifications] = useState<{ id: string; title: string; text: string; channel: string; time: string; unread: boolean }[]>([]);
 
   // Support Tickets State
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([
@@ -254,6 +238,32 @@ export default function CustomerPortal({
   }, []);
 
   useEffect(() => { loadUploads(); }, [loadUploads]);
+
+  const loadRealNotifications = useCallback(async () => {
+    try {
+      const res = await notificationsApi.list({ limit: 30 });
+      const serverItems = res.notifications.map(n => ({
+        id: n.id,
+        title: n.title,
+        text: n.body,
+        channel: "In-App",
+        time: new Date(n.created_at).toLocaleString(),
+        unread: !n.is_read,
+      }));
+      setNotifications(prev => {
+        const localOnly = prev.filter(p => p.id.startsWith("not-"));
+        return [...localOnly, ...serverItems];
+      });
+    } catch (err) {
+      console.error("[CustomerPortal] Failed to load notifications:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadRealNotifications();
+    const interval = setInterval(loadRealNotifications, 30000);
+    return () => clearInterval(interval);
+  }, [loadRealNotifications]);
   const [isDragging, setIsDragging] = useState(false);
 
   // AI Assistant Chat state
@@ -1785,10 +1795,9 @@ export default function CustomerPortal({
                     <span className="font-mono text-[11px] text-slate-650 font-semibold">Security Protocol ID: <b>2026-F9</b></span>
                   </div>
                   <button 
-                    onClick={() => {
-                      // Trigger fast notification count read
+                    onClick={async () => {
+                      try { await notificationsApi.markAllRead(); } catch { /* non-fatal */ }
                       setNotifications(prev => prev.map(n => ({ ...n, unread: false })));
-                      alert("All in-app alerts marked read.");
                     }}
                     className="p-1 px-3 bg-white border border-slate-200 hover:bg-slate-50 transition rounded-xl text-[11.5px] font-sans font-medium text-slate-700 flex items-center gap-1.5 shadow-xs cursor-pointer select-none"
                   >

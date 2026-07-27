@@ -49,6 +49,7 @@ export interface CreateAppointmentInput {
   endTime?: string;
   notes?: string;
   bookedBy?: string;
+  bookedByRole?: string;
   assignedEmployeeId?: string;
 }
 
@@ -67,18 +68,26 @@ export interface ListAppointmentsFilters {
 
 async function resolveCustomerId(
   tenantId: string,
-  input: { customerId?: string; customerName: string; customerEmail?: string; bookedBy?: string }
+  input: { customerId?: string; customerName: string; customerEmail?: string; bookedBy?: string; bookedByRole?: string }
 ): Promise<string | null> {
   if (input.customerId) return input.customerId;
 
+  const linkUserId = input.bookedByRole === "CUSTOMER" ? input.bookedBy : undefined;
+
   if (input.customerEmail) {
-    const { rows } = await query<{ id: string }>(
-      `SELECT id FROM customers
+    const { rows } = await query<{ id: string; user_id: string | null }>(
+      `SELECT id, user_id FROM customers
        WHERE tenant_id = $1 AND email = $2 AND is_deleted = FALSE
        LIMIT 1`,
       [tenantId, input.customerEmail.toLowerCase().trim()]
     );
-    if (rows[0]) return rows[0].id;
+    if (rows[0]) {
+      // Backfill the portal-login link if we now know it and didn't before
+      if (linkUserId && !rows[0].user_id) {
+        await query(`UPDATE customers SET user_id = $1 WHERE id = $2`, [linkUserId, rows[0].id]);
+      }
+      return rows[0].id;
+    }
   }
 
   const customer = await createCustomer(
@@ -86,6 +95,7 @@ async function resolveCustomerId(
     {
       fullName: input.customerName.trim(),
       email: input.customerEmail?.trim(),
+      userId: linkUserId,
     },
     input.bookedBy!
   );
@@ -183,6 +193,7 @@ export async function createAppointment(
     customerName: input.customerName,
     customerEmail: input.customerEmail,
     bookedBy: input.bookedBy,
+    bookedByRole: input.bookedByRole,
   });
 
   const startTime = new Date(input.startTime);

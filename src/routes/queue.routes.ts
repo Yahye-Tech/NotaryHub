@@ -16,6 +16,7 @@ import {
 } from "../services/queue.service.js";
 import { writeAuditLog } from "../auth/auth.service.js";
 import { query as dbQuery } from "../db/pool.js";
+import { createNotification, getCustomerUserId } from "../services/notification.service.js";
 
 const router = Router();
 
@@ -178,6 +179,25 @@ router.post("/call-next", requireAuth, requireMinRole("EMPLOYEE"), [
       ipAddress: getIp(req),
       meta: { ticketId: ticket.id, ticketNumber: ticket.ticket_number, counter: ticket.called_counter },
     });
+
+    (async () => {
+      try {
+        const customerUserId = await getCustomerUserId(ticket.customer_id);
+        if (customerUserId) {
+          await createNotification({
+            userId: customerUserId,
+            tenantId,
+            type: "info",
+            title: "You've been called",
+            body: `Ticket ${ticket.ticket_number} — please proceed to counter ${ticket.called_counter}.`,
+            resourceType: "queue_ticket",
+            resourceId: ticket.id,
+          });
+        }
+      } catch (notifErr: any) {
+        console.error("[Notifications] Queue call notify error:", notifErr.message);
+      }
+    })();
 
     res.json({ message: `Calling ${ticket.ticket_number} to counter ${ticket.called_counter}`, ticket });
   } catch (err: any) {

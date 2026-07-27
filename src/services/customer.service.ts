@@ -95,6 +95,7 @@ export interface CreateCustomerInput {
   idExpiryDate?: string;
   idIssuingAuthority?: string;
   notes?: string;
+  userId?: string; // Links this customer record to a CUSTOMER-role portal login, if booked by one
 }
 
 export async function createCustomer(
@@ -116,12 +117,12 @@ export async function createCustomer(
        tenant_id, full_name, email, phone,
        date_of_birth, nationality, address, city, country,
        id_type, id_number, id_issue_date, id_expiry_date, id_issuing_authority,
-       notes, created_by
+       notes, created_by, user_id
      ) VALUES (
        $1, $2, $3, $4,
        $5, $6, $7, $8, $9,
        $10, $11, $12, $13, $14,
-       $15, $16
+       $15, $16, $17
      )
      RETURNING *`,
     [
@@ -141,6 +142,7 @@ export async function createCustomer(
       input.idIssuingAuthority ?? null,
       input.notes ?? null,
       createdBy,
+      input.userId ?? null,
     ]
   );
   return rows[0];

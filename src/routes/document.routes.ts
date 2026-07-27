@@ -16,6 +16,7 @@ import {
   type DocumentType,
 } from "../services/document.service.js";
 import { writeAuditLog } from "../auth/auth.service.js";
+import { createNotification, createNotificationForUsers, getCustomerUserId, getBranchAdminUserIds } from "../services/notification.service.js";
 
 const router = Router();
 
@@ -312,6 +313,49 @@ router.post("/:id/transition", requireAuth, requireMinRole("EMPLOYEE"), [
       req.user!.sub,
       { rejectionReason, reviewedBy: req.user!.sub }
     );
+
+    // Fire-and-forget real notifications — failures here must never break the transition response
+    (async () => {
+      try {
+        const statusMessages: Record<string, { title: string; body: string; type: "info" | "success" | "warning" | "error" }> = {
+          pending_review: { title: "Document submitted for review", body: `${document.document_number} is awaiting review.`, type: "info" },
+          approved:       { title: "Document approved", body: `${document.document_number} has been approved.`, type: "success" },
+          signed:         { title: "Document signed", body: `${document.document_number} has been signed.`, type: "success" },
+          notarised:      { title: "Document notarised", body: `${document.document_number} has been notarised and finalized.`, type: "success" },
+          rejected:       { title: "Document rejected", body: `${document.document_number} was rejected${rejectionReason ? `: ${rejectionReason}` : "."}`, type: "warning" },
+          revoked:        { title: "Document revoked", body: `${document.document_number} has been revoked.`, type: "error" },
+        };
+
+        const msg = statusMessages[status];
+        if (msg) {
+          const customerUserId = await getCustomerUserId(document.customer_id);
+          if (customerUserId) {
+            await createNotification({
+              userId: customerUserId,
+              tenantId,
+              type: msg.type,
+              title: msg.title,
+              body: msg.body,
+              resourceType: "document",
+              resourceId: document.id,
+            });
+          }
+          if (status === "pending_review") {
+            const branchAdminIds = await getBranchAdminUserIds(document.branch_id);
+            await createNotificationForUsers(branchAdminIds, {
+              tenantId,
+              type: "info",
+              title: "Document needs review",
+              body: `${document.document_number} is awaiting your review.`,
+              resourceType: "document",
+              resourceId: document.id,
+            });
+          }
+        }
+      } catch (notifErr: any) {
+        console.error("[Notifications] Document transition notify error:", notifErr.message);
+      }
+    })();
 
     res.json({
       message: `Document moved to '${status}'`,
