@@ -338,6 +338,7 @@ router.post("/:id/transition", requireAuth, requireMinRole("EMPLOYEE"), [
               body: msg.body,
               resourceType: "document",
               resourceId: document.id,
+              sendEmail: true,
             });
           }
           if (status === "pending_review") {

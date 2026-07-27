@@ -352,6 +352,7 @@ router.post("/:id/transition", requireAuth, requireMinRole("CUSTOMER"), [
                 body: msg.body,
                 resourceType: "appointment",
                 resourceId: appointment.id,
+                sendEmail: true,
               });
             }
           }

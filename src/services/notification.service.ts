@@ -1,4 +1,5 @@
 import { query } from "../db/pool.js";
+import { sendNotificationEmail } from "./email.service.js";
 
 export type NotificationType = "info" | "success" | "warning" | "error";
 
@@ -26,13 +27,14 @@ export interface CreateNotificationInput {
   actionUrl?: string;
   resourceType?: string;
   resourceId?: string;
+  sendEmail?: boolean; // If true, also attempts real email delivery (best-effort, non-fatal on failure)
 }
 
 // Insert a single notification for one recipient.
 export async function createNotification(input: CreateNotificationInput): Promise<NotificationRecord> {
   const { rows } = await query<NotificationRecord>(
-    `INSERT INTO notifications (user_id, tenant_id, type, title, body, action_url, resource_type, resource_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `INSERT INTO notifications (user_id, tenant_id, type, title, body, action_url, resource_type, resource_id, send_email)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      RETURNING *`,
     [
       input.userId,
@@ -43,9 +45,35 @@ export async function createNotification(input: CreateNotificationInput): Promis
       input.actionUrl ?? null,
       input.resourceType ?? null,
       input.resourceId ?? null,
+      input.sendEmail ?? false,
     ]
   );
-  return rows[0];
+  const notification = rows[0];
+
+  if (input.sendEmail) {
+    // Best-effort — a failed email must never break notification creation or the caller's request.
+    deliverNotificationEmail(notification).catch(err => {
+      console.error("[Notifications] Email delivery failed:", err.message);
+    });
+  }
+
+  return notification;
+}
+
+async function deliverNotificationEmail(notification: NotificationRecord): Promise<void> {
+  const { rows } = await query<{ email: string; full_name: string }>(
+    `SELECT email, full_name FROM users WHERE id = $1 AND is_deleted = FALSE`,
+    [notification.user_id]
+  );
+  const user = rows[0];
+  if (!user) return;
+
+  await sendNotificationEmail(user.email, user.full_name, notification.title, notification.body, notification.action_url);
+
+  await query(
+    `UPDATE notifications SET email_sent = TRUE, email_sent_at = NOW() WHERE id = $1`,
+    [notification.id]
+  );
 }
 
 // Insert the same notification for multiple recipients (e.g. all branch admins).

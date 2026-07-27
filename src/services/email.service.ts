@@ -197,3 +197,36 @@ export async function sendTwoFactorEnabledEmail(
     text: `2FA has been enabled on your ${APP_NAME} account.`,
   });
 }
+
+// ─── Email: Notification Delivery ──────────────────────────────────────────
+
+export async function sendNotificationEmail(
+  to: string,
+  fullName: string,
+  title: string,
+  notificationBody: string,
+  actionUrl?: string | null
+): Promise<void> {
+  const link = actionUrl ? (actionUrl.startsWith("http") ? actionUrl : `${APP_URL}${actionUrl}`) : APP_URL;
+
+  const body = `
+    <p>Hi <strong>${fullName}</strong>,</p>
+    <p><strong>${title}</strong></p>
+    <p>${notificationBody}</p>
+    <a href="${link}" class="btn">View in ${APP_NAME}</a>
+    <p class="note">You're receiving this because it's an update on your account activity.</p>
+  `;
+
+  const info = await getTransporter().sendMail({
+    from: FROM,
+    to,
+    subject: `[${APP_NAME}] ${title}`,
+    html: htmlWrapper(title, body),
+    text: `${title}\n\n${notificationBody}\n\n${link}`,
+  });
+
+  if (process.env.NODE_ENV !== "production") {
+    const preview = nodemailer.getTestMessageUrl(info);
+    if (preview) console.log(`[Email] Notification email preview: ${preview}`);
+  }
+}
