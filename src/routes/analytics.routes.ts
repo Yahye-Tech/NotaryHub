@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { requireAuth, requireMinRole } from "../middleware/auth.middleware.js";
+import { requireAuth, requireMinRole, requirePermission } from "../middleware/auth.middleware.js";
 import { query } from "../db/pool.js";
 
 const router = Router();
@@ -64,7 +64,7 @@ function buildTenantWhere(req: Request, alias = ""): { where: string; params: (s
 //    SELECT SUM(amount_cents), month FROM payments GROUP BY month
 //    Returns: last 12 months of revenue per month
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/revenue", requireAuth, requireMinRole("COMPANY_ADMIN"), async (req: Request, res: Response) => {
+router.get("/revenue", requireAuth, requireMinRole("COMPANY_ADMIN"), requirePermission("VIEW_REPORTS"), async (req: Request, res: Response) => {
   try {
     const { where, params } = buildTenantWhere(req);
     const paramOffset = params.length;
@@ -246,7 +246,7 @@ router.get("/company-growth", requireAuth, requireMinRole("SUPER_ADMIN"), async 
 //    SELECT doc_type, status, COUNT(*) FROM documents GROUP BY doc_type, month
 //    Returns: doc volume by type, by status, by month
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/documents", requireAuth, requireMinRole("COMPANY_ADMIN"), async (req: Request, res: Response) => {
+router.get("/documents", requireAuth, requireMinRole("COMPANY_ADMIN"), requirePermission("VIEW_REPORTS"), async (req: Request, res: Response) => {
   try {
     const { where, params } = buildTenantWhere(req);
 
@@ -462,7 +462,7 @@ router.get("/subscriptions", requireAuth, requireMinRole("SUPER_ADMIN"), async (
 //    LEFT JOIN employees e ... LEFT JOIN documents d ...
 //    GROUP BY b.id
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/branches", requireAuth, requireMinRole("COMPANY_ADMIN"), async (req: Request, res: Response) => {
+router.get("/branches", requireAuth, requireMinRole("COMPANY_ADMIN"), requirePermission("VIEW_REPORTS"), async (req: Request, res: Response) => {
   try {
     const isSuper = req.user!.role === "SUPER_ADMIN";
     const tenantParam = req.user!.tenantId;
@@ -556,7 +556,7 @@ router.get("/branches", requireAuth, requireMinRole("COMPANY_ADMIN"), async (req
 // 6. OVERVIEW / SUMMARY (for dashboard KPI cards)
 //    Single endpoint returning all key counts for the current user's scope
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/overview", requireAuth, requireMinRole("COMPANY_ADMIN"), async (req: Request, res: Response) => {
+router.get("/overview", requireAuth, requireMinRole("COMPANY_ADMIN"), requirePermission("VIEW_REPORTS"), async (req: Request, res: Response) => {
   try {
     const isSuper = req.user!.role === "SUPER_ADMIN";
     const tp = req.user!.tenantId;
@@ -638,7 +638,7 @@ router.get("/overview", requireAuth, requireMinRole("COMPANY_ADMIN"), async (req
 //    single branch (and its tenant). Types: daily | weekly | monthly |
 //    employee | document | revenue
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/branch-report", requireAuth, requireMinRole("BRANCH_ADMIN"), async (req: Request, res: Response) => {
+router.get("/branch-report", requireAuth, requireMinRole("BRANCH_ADMIN"), requirePermission("VIEW_REPORTS"), async (req: Request, res: Response) => {
   const tenantId = req.user!.tenantId;
   if (!tenantId) {
     res.status(400).json({ error: "NO_TENANT" });

@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { validationResult } from "express-validator";
-import { requireAuth, requireRole, requireMinRole } from "../middleware/auth.middleware.js";
+import { requireAuth, requireRole, requireMinRole, requirePermission } from "../middleware/auth.middleware.js";
 import {
   getAllTenants,
   getTenantById,
@@ -132,7 +132,7 @@ router.post("/", requireAuth, requireRole("SUPER_ADMIN"), createTenantValidator,
 });
 
 // PATCH /api/tenants/:tenantId
-router.patch("/:tenantId", requireAuth, requireRole("SUPER_ADMIN"), updateTenantValidator, async (req: Request, res: Response) => {
+router.patch("/:tenantId", requireAuth, requireRole("SUPER_ADMIN"), requirePermission("MANAGE_SUBSCRIPTIONS"), updateTenantValidator, async (req: Request, res: Response) => {
   if (!validate(req, res)) return;
 
   const { tenantId } = req.params;
@@ -263,7 +263,7 @@ router.get("/:tenantId/branches/:branchId", requireAuth, requireMinRole("BRANCH_
 });
 
 // POST /api/tenants/:tenantId/branches
-router.post("/:tenantId/branches", requireAuth, requireMinRole("COMPANY_ADMIN"), createBranchValidator, async (req: Request, res: Response) => {
+router.post("/:tenantId/branches", requireAuth, requireMinRole("COMPANY_ADMIN"), requirePermission("CREATE_BRANCH"), createBranchValidator, async (req: Request, res: Response) => {
   if (!validate(req, res)) return;
   if (!enforceTenantScope(req, res)) return;
 
@@ -415,7 +415,7 @@ router.get("/:tenantId/branches/:branchId/employees/:employeeId", requireAuth, r
 });
 
 // POST /api/tenants/:tenantId/branches/:branchId/employees
-router.post("/:tenantId/branches/:branchId/employees", requireAuth, requireMinRole("COMPANY_ADMIN"), createEmployeeValidator, async (req: Request, res: Response) => {
+router.post("/:tenantId/branches/:branchId/employees", requireAuth, requireMinRole("COMPANY_ADMIN"), requirePermission("CREATE_EMPLOYEE"), createEmployeeValidator, async (req: Request, res: Response) => {
   if (!validate(req, res)) return;
   if (!enforceTenantScope(req, res)) return;
   const { tenantId, branchId } = req.params;

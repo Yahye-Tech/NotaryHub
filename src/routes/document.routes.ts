@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { body, param, query as queryParam } from "express-validator";
 import { validationResult } from "express-validator";
-import { requireAuth, requireMinRole } from "../middleware/auth.middleware.js";
+import { requireAuth, requireMinRole, requirePermission } from "../middleware/auth.middleware.js";
 import {
   getDocumentsByTenant,
   getDocumentsByBranch,
@@ -145,7 +145,7 @@ router.get("/:id", requireAuth, requireMinRole("CUSTOMER"),
 // POST /api/documents
 // Create a new document (starts as draft)
 // ─────────────────────────────────────────────────────────────────────────────
-router.post("/", requireAuth, requireMinRole("EMPLOYEE"), [
+router.post("/", requireAuth, requireMinRole("EMPLOYEE"), requirePermission("CREATE_DOCUMENT"), [
   body("branchId").isUUID().withMessage("Valid branchId required"),
   body("title").isString().trim().isLength({ min: 3, max: 255 }).withMessage("Title required (3-255 chars)"),
   body("docType").isIn([
@@ -219,7 +219,7 @@ router.post("/", requireAuth, requireMinRole("EMPLOYEE"), [
 // PATCH /api/documents/:id
 // Update content (only allowed in draft or rejected status)
 // ─────────────────────────────────────────────────────────────────────────────
-router.patch("/:id", requireAuth, requireMinRole("EMPLOYEE"), [
+router.patch("/:id", requireAuth, requireMinRole("EMPLOYEE"), requirePermission("EDIT_DOCUMENT"), [
   param("id").isUUID(),
   body("title").optional().isString().trim().isLength({ min: 3, max: 255 }),
   body("content").optional().isString(),
@@ -378,7 +378,7 @@ router.post("/:id/transition", requireAuth, requireMinRole("EMPLOYEE"), [
 // DELETE /api/documents/:id
 // Soft-delete (blocked for notarised/signed documents)
 // ─────────────────────────────────────────────────────────────────────────────
-router.delete("/:id", requireAuth, requireMinRole("COMPANY_ADMIN"), [
+router.delete("/:id", requireAuth, requireMinRole("COMPANY_ADMIN"), requirePermission("DELETE_DOCUMENT"), [
   param("id").isUUID(),
 ], async (req: Request, res: Response) => {
   if (!validate(req, res)) return;

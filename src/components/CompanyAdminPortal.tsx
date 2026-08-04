@@ -4,11 +4,12 @@ import {
   Settings, RefreshCw, Sparkles, Sliders, Check, 
   HelpCircle, ChevronRight, Bell, Search, Bot, 
   FileSpreadsheet, ToggleLeft, ToggleRight, 
-  LayoutDashboard, UserCheck, ShieldAlert, LogOut, Menu, X,
+  LayoutDashboard, UserCheck, LogOut, Menu, X,
   Trash2, Edit, Edit3, Archive, KeyRound, Play, Plus, Clock, Shield, Sun, Moon
 } from "lucide-react";
 import { EmployeeForm, BranchForm, Modal, type EmployeeFormData, type BranchFormData } from "./FormComponents";
 import { Tenant, Branch, Employee, QueueTicket, NotaryDocument, AuditLog } from "../types";
+import PermissionsConfig, { type PermissionsMatrix } from "./PermissionsConfig";
 
 // Import custom extracted sub-components
 import CompanyAdminDashboard from "./company/CompanyAdminDashboard";
@@ -43,8 +44,8 @@ interface CompanyAdminPortalProps {
   lockTenant?: boolean;
   onLogout: () => void;
   // Dynamic role controls
-  permissionsMatrix?: Record<string, Record<string, boolean>>;
-  onUpdatePermissions?: (matrix: any) => void;
+  permissionsMatrix?: PermissionsMatrix;
+  onUpdatePermissions?: (matrix: PermissionsMatrix) => void;
   // Audit Logs
   auditLogs?: AuditLog[];
 }
@@ -1552,80 +1553,14 @@ export default function CompanyAdminPortal({
                 </div>
               </div>
 
-              {/* Dynamic RBAC Role Permissions Control Grid */}
+              {/* Dynamic RBAC Role Permissions Control Grid — tenant-scoped, live-enforced */}
               {permissionsMatrix && onUpdatePermissions && (
-                <div className="bg-slate-50/30 border border-slate-200 p-5 rounded-xl space-y-4 mt-6">
-                  <div className="flex gap-2 items-center">
-                    <ShieldAlert className="w-5 h-5 text-indigo-650" />
-                    <div>
-                      <h4 className="text-sm font-sans font-bold text-slate-900">Role Permissions Matrix (RBAC) — Preview Only</h4>
-                      <p className="text-xs text-slate-500">This is a preview of intended role permissions. It does not change real access — enforcement is fixed in the backend role hierarchy.</p>
-                    </div>
-                  </div>
-
-                  <div className="overflow-x-auto text-xs text-slate-700 bg-white border border-slate-200 rounded-xl shadow-xs">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-mono uppercase tracking-wider text-slate-500">
-                          <th className="p-3.5 font-bold">System Role</th>
-                          <th className="p-3.5 font-bold text-center">Draft Document</th>
-                          <th className="p-3.5 font-bold text-center">Onboard Staff Clerks</th>
-                          <th className="p-3.5 font-bold text-center">View Reports</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {["EMPLOYEE", "BRANCH_ADMIN", "CUSTOMER"].map(role => (
-                          <tr key={role} className="hover:bg-slate-50/50">
-                            <td className="p-3.5 font-bold text-slate-900 font-mono text-[11px]">
-                              ROLE_{role}
-                            </td>
-                            <td className="p-3.5 text-center">
-                              <input 
-                                type="checkbox"
-                                checked={!!permissionsMatrix[role]?.["CREATE_DOCUMENT"]}
-                                onChange={(e) => {
-                                  const updated = {
-                                    ...permissionsMatrix,
-                                    [role]: { ...permissionsMatrix[role], "CREATE_DOCUMENT": e.target.checked }
-                                  };
-                                  onUpdatePermissions(updated);
-                                }}
-                                className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
-                              />
-                            </td>
-                            <td className="p-3.5 text-center">
-                              <input 
-                                type="checkbox"
-                                checked={!!permissionsMatrix[role]?.["MANAGE_EMPLOYEES"]}
-                                onChange={(e) => {
-                                  const updated = {
-                                    ...permissionsMatrix,
-                                    [role]: { ...permissionsMatrix[role], "MANAGE_EMPLOYEES": e.target.checked }
-                                  };
-                                  onUpdatePermissions(updated);
-                                }}
-                                className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
-                              />
-                            </td>
-                            <td className="p-3.5 text-center">
-                              <input 
-                                type="checkbox"
-                                checked={!!permissionsMatrix[role]?.["VIEW_REPORTS"]}
-                                onChange={(e) => {
-                                  const updated = {
-                                    ...permissionsMatrix,
-                                    [role]: { ...permissionsMatrix[role], "VIEW_REPORTS": e.target.checked }
-                                  };
-                                  onUpdatePermissions(updated);
-                                }}
-                                className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
-                              />
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                <div className="mt-6">
+                  <PermissionsConfig
+                    permissionsMatrix={permissionsMatrix}
+                    onUpdatePermissions={onUpdatePermissions}
+                    scope="tenant"
+                  />
                 </div>
               )}
 

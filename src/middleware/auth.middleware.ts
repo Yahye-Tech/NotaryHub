@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { verifyAccessToken, type AccessTokenPayload } from "../auth/jwt.service.js";
+import { resolvePermission, type PermissionKey } from "../services/permissions.service.js";
 
 // Extend Express Request with the authenticated user
 declare global {
@@ -126,4 +127,39 @@ export function requireTenantAccess(req: Request, res: Response, next: NextFunct
   }
 
   next();
+}
+
+// ─── requirePermission ────────────────────────────────────────────────────
+// Checks the caller's role against the dynamic, DB-backed permission matrix
+// (tenant override → platform default → hardcoded fallback), rather than
+// the fixed role hierarchy alone. Always call after requireAuth.
+// SUPER_ADMIN resolves against the platform-wide (tenant_id NULL) layer only,
+// since a SUPER_ADMIN acting cross-tenant isn't bound to any single tenant's
+// overrides.
+
+export function requirePermission(key: PermissionKey) {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (!req.user) {
+      res.status(401).json({ error: "UNAUTHENTICATED", message: "Authentication required" });
+      return;
+    }
+
+    const role = req.user.role as Role;
+    const tenantId = role === "SUPER_ADMIN" ? null : req.user.tenantId ?? null;
+
+    try {
+      const allowed = await resolvePermission(tenantId, role, key);
+      if (!allowed) {
+        res.status(403).json({
+          error: "PERMISSION_DENIED",
+          message: `Role '${role}' does not have permission '${key}'`,
+        });
+        return;
+      }
+      next();
+    } catch (err: any) {
+      console.error("[Permissions] Resolution error:", err.message);
+      res.status(500).json({ error: "INTERNAL_ERROR", message: "Failed to resolve permissions" });
+    }
+  };
 }

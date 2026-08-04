@@ -1522,6 +1522,7 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
                 <PermissionsConfig
                   permissionsMatrix={permissionsMatrix}
                   onUpdatePermissions={onUpdatePermissions}
+                  scope="platform"
                 />
               </div>
             )}

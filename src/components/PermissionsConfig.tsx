@@ -1,31 +1,26 @@
 import { useState } from "react";
-import { ShieldCheck, ToggleLeft, ToggleRight, HelpCircle, AlertTriangle } from "lucide-react";
+import { ShieldCheck, ToggleLeft, ToggleRight, HelpCircle, AlertTriangle, RotateCcw, Loader2 } from "lucide-react";
+import { permissionsApi, type Role, type PermissionKey, type PermissionsMatrix } from "../api/permissions.api";
 
-export type Role = "SUPER_ADMIN" | "COMPANY_ADMIN" | "BRANCH_ADMIN" | "EMPLOYEE" | "CUSTOMER";
-export type PermissionKey = 
-  | "CREATE_DOCUMENT" 
-  | "EDIT_DOCUMENT" 
-  | "DELETE_DOCUMENT" 
-  | "VIEW_REPORTS" 
-  | "CREATE_EMPLOYEE" 
-  | "CREATE_BRANCH" 
-  | "MANAGE_SUBSCRIPTIONS";
-
-export interface PermissionsMatrix {
-  SUPER_ADMIN: Record<PermissionKey, boolean>;
-  COMPANY_ADMIN: Record<PermissionKey, boolean>;
-  BRANCH_ADMIN: Record<PermissionKey, boolean>;
-  EMPLOYEE: Record<PermissionKey, boolean>;
-  CUSTOMER: Record<PermissionKey, boolean>;
-}
+export type { Role, PermissionKey, PermissionsMatrix };
 
 interface PermissionsConfigProps {
   permissionsMatrix: PermissionsMatrix;
   onUpdatePermissions: (matrix: PermissionsMatrix) => void;
+  // "platform" renders the SUPER_ADMIN default-editing view (no reset button,
+  // writes go to /api/permissions/platform). "tenant" is the normal
+  // COMPANY_ADMIN view with per-cell reset-to-default.
+  scope?: "tenant" | "platform";
 }
 
-export default function PermissionsConfig({ permissionsMatrix, onUpdatePermissions }: PermissionsConfigProps) {
+export default function PermissionsConfig({
+  permissionsMatrix,
+  onUpdatePermissions,
+  scope = "tenant",
+}: PermissionsConfigProps) {
   const [hoveredPermission, setHoveredPermission] = useState<PermissionKey | null>(null);
+  const [pendingCell, setPendingCell] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const rolesList: Role[] = ["SUPER_ADMIN", "COMPANY_ADMIN", "BRANCH_ADMIN", "EMPLOYEE", "CUSTOMER"];
   const permissionsList: { key: PermissionKey; title: string; description: string }[] = [
@@ -35,25 +30,47 @@ export default function PermissionsConfig({ permissionsMatrix, onUpdatePermissio
     { key: "VIEW_REPORTS", title: "View Reports", description: "Grants access to company billing, employee KPI reviews, and branch performance statistics." },
     { key: "CREATE_EMPLOYEE", title: "Create Employee", description: "Enables onboarding, suspending, and editing role parameters for clerks." },
     { key: "CREATE_BRANCH", title: "Create Branch", description: "Allows establishing new physical and logical counter bureaus within the tenant domain." },
-    { key: "MANAGE_SUBSCRIPTIONS", title: "Manage Subscriptions", description: "Allows upgrading, downgrading, or settling recurring subscription plans." }
+    { key: "MANAGE_SUBSCRIPTIONS", title: "Manage Subscriptions", description: "Allows upgrading, downgrading, or settling recurring subscription plans." },
   ];
 
-  const handleToggle = (role: Role, permission: PermissionKey) => {
-    // SUPER_ADMIN must keep this in the preview matrix — not a real safety
-    // lock, since this screen has no effect on actual enforcement anyway.
+  const cellId = (role: Role, key: PermissionKey) => `${role}:${key}`;
+
+  const handleToggle = async (role: Role, permission: PermissionKey) => {
     if (role === "SUPER_ADMIN" && permission === "MANAGE_SUBSCRIPTIONS") {
-      alert("Role safety lock: SUPER_ADMIN must maintain subscription and license management access.");
+      setErrorMsg("SUPER_ADMIN must always retain subscription management access — this permission is locked server-side.");
       return;
     }
 
-    const updatedMatrix = {
-      ...permissionsMatrix,
-      [role]: {
-        ...permissionsMatrix[role],
-        [permission]: !permissionsMatrix[role][permission]
-      }
-    };
-    onUpdatePermissions(updatedMatrix);
+    const id = cellId(role, permission);
+    const nextValue = !permissionsMatrix[role][permission];
+    setPendingCell(id);
+    setErrorMsg(null);
+
+    try {
+      const result =
+        scope === "platform"
+          ? await permissionsApi.setPlatform(role, permission, nextValue)
+          : await permissionsApi.set(role, permission, nextValue);
+      onUpdatePermissions(result.matrix);
+    } catch (err: any) {
+      setErrorMsg(err?.message || "Failed to update permission");
+    } finally {
+      setPendingCell(null);
+    }
+  };
+
+  const handleReset = async (role: Role, permission: PermissionKey) => {
+    const id = cellId(role, permission);
+    setPendingCell(id);
+    setErrorMsg(null);
+    try {
+      const result = await permissionsApi.reset(role, permission);
+      onUpdatePermissions(result.matrix);
+    } catch (err: any) {
+      setErrorMsg(err?.message || "Failed to reset permission");
+    } finally {
+      setPendingCell(null);
+    }
   };
 
   return (
@@ -62,24 +79,26 @@ export default function PermissionsConfig({ permissionsMatrix, onUpdatePermissio
         <div>
           <h3 className="text-sm font-sans font-semibold text-white flex items-center gap-1.5">
             <ShieldCheck className="w-4 h-4 text-indigo-400" />
-            RBAC Permissions Preview
+            RBAC Permissions {scope === "platform" ? "— Platform Defaults" : "Matrix"}
           </h3>
           <p className="text-xs text-slate-400 mt-1">
-            This shows the permission set each role is intended to have. Toggling here does not change access —
-            real enforcement is hardcoded in the backend's role hierarchy middleware.
+            {scope === "platform"
+              ? "These are the platform-wide default permissions. Individual companies can override them for their own tenant."
+              : "Toggling a cell writes a tenant-specific override, enforced server-side on every request. Use the reset icon to revert to the platform default."}
           </p>
         </div>
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-950 border border-slate-850 rounded text-[10px] font-mono text-amber-300">
-          <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-          PREVIEW ONLY — NOT ENFORCED
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-950 border border-emerald-900/50 rounded text-[10px] font-mono text-emerald-300">
+          <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+          LIVE — ENFORCED
         </div>
       </div>
 
-      <div className="bg-amber-950/20 border border-amber-900/40 rounded-lg p-3 text-[11px] text-amber-200 leading-relaxed">
-        Dynamic, per-role permission management isn't built yet. Changing a toggle below only updates this screen's local state
-        — it has no effect on what any user can actually do. Real access control still comes from the fixed role hierarchy
-        (SUPER_ADMIN → COMPANY_ADMIN → BRANCH_ADMIN → EMPLOYEE → CUSTOMER) enforced server-side.
-      </div>
+      {errorMsg && (
+        <div className="bg-red-950/20 border border-red-900/40 rounded-lg p-3 text-[11px] text-red-200 leading-relaxed flex items-start gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+          {errorMsg}
+        </div>
+      )}
 
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse min-w-[700px]">
@@ -95,8 +114,8 @@ export default function PermissionsConfig({ permissionsMatrix, onUpdatePermissio
           </thead>
           <tbody className="divide-y divide-slate-850 text-xs">
             {permissionsList.map(({ key, title, description }) => (
-              <tr 
-                key={key} 
+              <tr
+                key={key}
                 className="hover:bg-slate-900/30 transition-all"
                 onMouseEnter={() => setHoveredPermission(key)}
                 onMouseLeave={() => setHoveredPermission(null)}
@@ -112,21 +131,39 @@ export default function PermissionsConfig({ permissionsMatrix, onUpdatePermissio
                 </td>
                 {rolesList.map(role => {
                   const isChecked = permissionsMatrix[role][key];
+                  const id = cellId(role, key);
+                  const isPending = pendingCell === id;
+                  const isLocked = role === "SUPER_ADMIN" && key === "MANAGE_SUBSCRIPTIONS";
                   return (
                     <td key={role} className="py-3.5 px-4 text-center">
-                      <button
-                        onClick={() => handleToggle(role, key)}
-                        className={`inline-flex items-center justify-center outline-none transition-transform active:scale-95 ${
-                          isChecked ? "text-indigo-400 hover:text-indigo-300" : "text-slate-650 hover:text-slate-500"
-                        }`}
-                        title={`Toggle ${title} for ${role.replace("_", " ")}`}
-                      >
-                        {isChecked ? (
-                          <ToggleRight className="w-7 h-7" />
-                        ) : (
-                          <ToggleLeft className="w-7 h-7" />
+                      <div className="inline-flex items-center gap-1">
+                        <button
+                          onClick={() => handleToggle(role, key)}
+                          disabled={isPending || isLocked}
+                          className={`inline-flex items-center justify-center outline-none transition-transform active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed ${
+                            isChecked ? "text-indigo-400 hover:text-indigo-300" : "text-slate-650 hover:text-slate-500"
+                          }`}
+                          title={isLocked ? "Locked: SUPER_ADMIN always retains this permission" : `Toggle ${title} for ${role.replace("_", " ")}`}
+                        >
+                          {isPending ? (
+                            <Loader2 className="w-7 h-7 animate-spin" />
+                          ) : isChecked ? (
+                            <ToggleRight className="w-7 h-7" />
+                          ) : (
+                            <ToggleLeft className="w-7 h-7" />
+                          )}
+                        </button>
+                        {scope === "tenant" && !isLocked && (
+                          <button
+                            onClick={() => handleReset(role, key)}
+                            disabled={isPending}
+                            className="text-slate-600 hover:text-slate-400 transition-colors disabled:opacity-40"
+                            title="Reset to platform default"
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                          </button>
                         )}
-                      </button>
+                      </div>
                     </td>
                   );
                 })}
@@ -136,7 +173,6 @@ export default function PermissionsConfig({ permissionsMatrix, onUpdatePermissio
         </table>
       </div>
 
-      {/* Dynamic Detail Card */}
       <div className="bg-slate-950 border border-slate-850 p-4 rounded-lg flex gap-3.5 items-start">
         <div className="p-2 rounded bg-indigo-950/20 text-indigo-400 shrink-0">
           <AlertTriangle className="w-4 h-4 text-indigo-400" />
@@ -157,8 +193,8 @@ export default function PermissionsConfig({ permissionsMatrix, onUpdatePermissio
                 RBAC REFERENCE
               </span>
               <p className="text-[11px] text-slate-400 mt-1 leading-normal">
-                Hover over any permission name to see what it's intended to control. Remember: toggles on this screen are a
-                preview only and don't change real backend enforcement.
+                Hover over any permission name for details. Every toggle here calls the live API and is enforced
+                by the backend on the very next request — this is not a preview.
               </p>
             </div>
           )}

@@ -15,6 +15,7 @@ import PermissionsConfig, { PermissionsMatrix } from "./PermissionsConfig";
 
 import { authApi } from "../api/auth.api";
 import { tenantsApi, branchesApi, employeesApi } from "../api/tenants.api";
+import { permissionsApi } from "../api/permissions.api";
 import { setAccessToken, getAccessToken, ApiException } from "../api/client";
 import type { Tenant, Branch, Employee } from "../api/tenants.api";
 
@@ -362,9 +363,12 @@ export default function SaaSDashboard() {
     setFeatureFlags(prev => ({ ...prev, [flag]: !prev[flag as keyof typeof prev] }));
   }, []);
 
+  // Real RBAC permissions matrix — fetched from /api/permissions on login.
+  // Seeded with the same fallback values the backend uses so the UI has a
+  // sane shape before the fetch resolves; immediately overwritten below.
   const [permissionsMatrix, setPermissionsMatrix] = useState<PermissionsMatrix>({
     SUPER_ADMIN:   { CREATE_DOCUMENT: true,  EDIT_DOCUMENT: true,  DELETE_DOCUMENT: true,  VIEW_REPORTS: true,  CREATE_EMPLOYEE: true,  CREATE_BRANCH: true, MANAGE_SUBSCRIPTIONS: true },
-    COMPANY_ADMIN: { CREATE_DOCUMENT: true,  EDIT_DOCUMENT: true,  DELETE_DOCUMENT: false, VIEW_REPORTS: true,  CREATE_EMPLOYEE: true,  CREATE_BRANCH: true, MANAGE_SUBSCRIPTIONS: false },
+    COMPANY_ADMIN: { CREATE_DOCUMENT: true,  EDIT_DOCUMENT: true,  DELETE_DOCUMENT: true,  VIEW_REPORTS: true,  CREATE_EMPLOYEE: true,  CREATE_BRANCH: true, MANAGE_SUBSCRIPTIONS: true },
     BRANCH_ADMIN:  { CREATE_DOCUMENT: true,  EDIT_DOCUMENT: true,  DELETE_DOCUMENT: false, VIEW_REPORTS: true,  CREATE_EMPLOYEE: false, CREATE_BRANCH: false, MANAGE_SUBSCRIPTIONS: false },
     EMPLOYEE:      { CREATE_DOCUMENT: true,  EDIT_DOCUMENT: true,  DELETE_DOCUMENT: false, VIEW_REPORTS: false, CREATE_EMPLOYEE: false, CREATE_BRANCH: false, MANAGE_SUBSCRIPTIONS: false },
     CUSTOMER:      { CREATE_DOCUMENT: false, EDIT_DOCUMENT: false, DELETE_DOCUMENT: false, VIEW_REPORTS: false, CREATE_EMPLOYEE: false, CREATE_BRANCH: false, MANAGE_SUBSCRIPTIONS: false },
@@ -394,6 +398,19 @@ export default function SaaSDashboard() {
       }
     } catch (err) {
       console.error("[Dashboard] Failed to load data:", err);
+    }
+
+    // RBAC permissions matrix: SUPER_ADMIN edits platform defaults,
+    // everyone else gets their tenant's effective matrix (tenant
+    // override → platform default → hardcoded fallback, resolved server-side).
+    try {
+      const permRes =
+        user.role === "SUPER_ADMIN"
+          ? await permissionsApi.getPlatform()
+          : await permissionsApi.get();
+      setPermissionsMatrix(permRes.matrix);
+    } catch (err) {
+      console.error("[Dashboard] Failed to load permissions matrix:", err);
     }
   }, []);
 
@@ -661,6 +678,7 @@ export default function SaaSDashboard() {
         <PermissionsConfig
           permissionsMatrix={permissionsMatrix}
           onUpdatePermissions={setPermissionsMatrix}
+          scope="platform"
         />
       );
     }
