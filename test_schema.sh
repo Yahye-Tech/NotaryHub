@@ -63,8 +63,8 @@ check_fk "2n notifications.tenant_id → tenants"        notifications    tenant
 echo "=== BLOCK 3: 12 ENUM TYPES ==="
 ENUM_COUNT=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
   "SELECT COUNT(DISTINCT typname) FROM pg_type t JOIN pg_enum e ON t.oid = e.enumtypid;" 2>/dev/null | tr -d ' \n')
-[ "$ENUM_COUNT" -eq "15" ] && { echo "  PASS: 3a 15 ENUMs defined ($ENUM_COUNT)"; PASS=$((PASS+1)); } \
-                            || { echo "  FAIL: 3a expected 15 ENUMs, got $ENUM_COUNT"; FAIL=$((FAIL+1)); }
+[ "$ENUM_COUNT" -eq "16" ] && { echo "  PASS: 3a 16 ENUMs defined ($ENUM_COUNT)"; PASS=$((PASS+1)); } \
+                            || { echo "  FAIL: 3a expected 16 ENUMs, got $ENUM_COUNT"; FAIL=$((FAIL+1)); }
 
 for enum in user_role user_status token_type customer_id_type customer_status \
             document_type document_status subscription_status billing_interval \

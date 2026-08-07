@@ -367,11 +367,11 @@ export default function SaaSDashboard() {
   // Seeded with the same fallback values the backend uses so the UI has a
   // sane shape before the fetch resolves; immediately overwritten below.
   const [permissionsMatrix, setPermissionsMatrix] = useState<PermissionsMatrix>({
-    SUPER_ADMIN:   { CREATE_DOCUMENT: true,  EDIT_DOCUMENT: true,  DELETE_DOCUMENT: true,  VIEW_REPORTS: true,  CREATE_EMPLOYEE: true,  CREATE_BRANCH: true, MANAGE_SUBSCRIPTIONS: true },
-    COMPANY_ADMIN: { CREATE_DOCUMENT: true,  EDIT_DOCUMENT: true,  DELETE_DOCUMENT: true,  VIEW_REPORTS: true,  CREATE_EMPLOYEE: true,  CREATE_BRANCH: true, MANAGE_SUBSCRIPTIONS: true },
-    BRANCH_ADMIN:  { CREATE_DOCUMENT: true,  EDIT_DOCUMENT: true,  DELETE_DOCUMENT: false, VIEW_REPORTS: true,  CREATE_EMPLOYEE: false, CREATE_BRANCH: false, MANAGE_SUBSCRIPTIONS: false },
-    EMPLOYEE:      { CREATE_DOCUMENT: true,  EDIT_DOCUMENT: true,  DELETE_DOCUMENT: false, VIEW_REPORTS: false, CREATE_EMPLOYEE: false, CREATE_BRANCH: false, MANAGE_SUBSCRIPTIONS: false },
-    CUSTOMER:      { CREATE_DOCUMENT: false, EDIT_DOCUMENT: false, DELETE_DOCUMENT: false, VIEW_REPORTS: false, CREATE_EMPLOYEE: false, CREATE_BRANCH: false, MANAGE_SUBSCRIPTIONS: false },
+    SUPER_ADMIN:   { CREATE_DOCUMENT: true,  EDIT_DOCUMENT: true,  DELETE_DOCUMENT: true,  VIEW_REPORTS: true,  CREATE_EMPLOYEE: true,  CREATE_BRANCH: true, MANAGE_SUBSCRIPTIONS: true, MANAGE_INVOICES: true },
+    COMPANY_ADMIN: { CREATE_DOCUMENT: true,  EDIT_DOCUMENT: true,  DELETE_DOCUMENT: true,  VIEW_REPORTS: true,  CREATE_EMPLOYEE: true,  CREATE_BRANCH: true, MANAGE_SUBSCRIPTIONS: true, MANAGE_INVOICES: true },
+    BRANCH_ADMIN:  { CREATE_DOCUMENT: true,  EDIT_DOCUMENT: true,  DELETE_DOCUMENT: false, VIEW_REPORTS: true,  CREATE_EMPLOYEE: false, CREATE_BRANCH: false, MANAGE_SUBSCRIPTIONS: false, MANAGE_INVOICES: true },
+    EMPLOYEE:      { CREATE_DOCUMENT: true,  EDIT_DOCUMENT: true,  DELETE_DOCUMENT: false, VIEW_REPORTS: false, CREATE_EMPLOYEE: false, CREATE_BRANCH: false, MANAGE_SUBSCRIPTIONS: false, MANAGE_INVOICES: false },
+    CUSTOMER:      { CREATE_DOCUMENT: false, EDIT_DOCUMENT: false, DELETE_DOCUMENT: false, VIEW_REPORTS: false, CREATE_EMPLOYEE: false, CREATE_BRANCH: false, MANAGE_SUBSCRIPTIONS: false, MANAGE_INVOICES: false },
   });
 
   // ── Load data when user logs in ───────────────────────────────────────────

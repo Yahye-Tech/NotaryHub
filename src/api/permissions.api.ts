@@ -8,7 +8,8 @@ export type PermissionKey =
   | "VIEW_REPORTS"
   | "CREATE_EMPLOYEE"
   | "CREATE_BRANCH"
-  | "MANAGE_SUBSCRIPTIONS";
+  | "MANAGE_SUBSCRIPTIONS"
+  | "MANAGE_INVOICES";
 
 export type PermissionsMatrix = Record<Role, Record<PermissionKey, boolean>>;
 

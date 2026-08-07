@@ -8,7 +8,8 @@ export type PermissionKey =
   | "VIEW_REPORTS"
   | "CREATE_EMPLOYEE"
   | "CREATE_BRANCH"
-  | "MANAGE_SUBSCRIPTIONS";
+  | "MANAGE_SUBSCRIPTIONS"
+  | "MANAGE_INVOICES";
 
 export const ALL_PERMISSION_KEYS: PermissionKey[] = [
   "CREATE_DOCUMENT",
@@ -18,6 +19,7 @@ export const ALL_PERMISSION_KEYS: PermissionKey[] = [
   "CREATE_EMPLOYEE",
   "CREATE_BRANCH",
   "MANAGE_SUBSCRIPTIONS",
+  "MANAGE_INVOICES",
 ];
 
 export const ALL_ROLES: Role[] = [
@@ -43,6 +45,7 @@ const HARDCODED_FALLBACK: Record<Role, Record<PermissionKey, boolean>> = {
     CREATE_EMPLOYEE: true,
     CREATE_BRANCH: true,
     MANAGE_SUBSCRIPTIONS: true,
+    MANAGE_INVOICES: true,
   },
   COMPANY_ADMIN: {
     CREATE_DOCUMENT: true,
@@ -52,6 +55,7 @@ const HARDCODED_FALLBACK: Record<Role, Record<PermissionKey, boolean>> = {
     CREATE_EMPLOYEE: true,
     CREATE_BRANCH: true,
     MANAGE_SUBSCRIPTIONS: true,
+    MANAGE_INVOICES: true,
   },
   BRANCH_ADMIN: {
     CREATE_DOCUMENT: true,
@@ -61,6 +65,7 @@ const HARDCODED_FALLBACK: Record<Role, Record<PermissionKey, boolean>> = {
     CREATE_EMPLOYEE: false,
     CREATE_BRANCH: false,
     MANAGE_SUBSCRIPTIONS: false,
+    MANAGE_INVOICES: true,
   },
   EMPLOYEE: {
     CREATE_DOCUMENT: true,
@@ -70,6 +75,7 @@ const HARDCODED_FALLBACK: Record<Role, Record<PermissionKey, boolean>> = {
     CREATE_EMPLOYEE: false,
     CREATE_BRANCH: false,
     MANAGE_SUBSCRIPTIONS: false,
+    MANAGE_INVOICES: false,
   },
   CUSTOMER: {
     CREATE_DOCUMENT: false,
@@ -79,6 +85,7 @@ const HARDCODED_FALLBACK: Record<Role, Record<PermissionKey, boolean>> = {
     CREATE_EMPLOYEE: false,
     CREATE_BRANCH: false,
     MANAGE_SUBSCRIPTIONS: false,
+    MANAGE_INVOICES: false,
   },
 };
 

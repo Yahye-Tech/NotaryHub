@@ -31,6 +31,7 @@ export default function PermissionsConfig({
     { key: "CREATE_EMPLOYEE", title: "Create Employee", description: "Enables onboarding, suspending, and editing role parameters for clerks." },
     { key: "CREATE_BRANCH", title: "Create Branch", description: "Allows establishing new physical and logical counter bureaus within the tenant domain." },
     { key: "MANAGE_SUBSCRIPTIONS", title: "Manage Subscriptions", description: "Allows upgrading, downgrading, or settling recurring subscription plans." },
+    { key: "MANAGE_INVOICES", title: "Manage Invoices", description: "Allows creating, editing, and recording payments on customer invoices." },
   ];
 
   const cellId = (role: Role, key: PermissionKey) => `${role}:${key}`;
