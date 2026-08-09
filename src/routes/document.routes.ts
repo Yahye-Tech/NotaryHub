@@ -11,10 +11,13 @@ import {
   createDocument,
   updateDocumentContent,
   transitionDocumentStatus,
+  attachCertificateFile,
   deleteDocument,
   type DocumentStatus,
   type DocumentType,
 } from "../services/document.service.js";
+import { generateNotaryCertificate } from "../services/certificate.service.js";
+import { createFileUpload } from "../services/upload.service.js";
 import { writeAuditLog } from "../auth/auth.service.js";
 import { createNotification, createNotificationForUsers, getCustomerUserId, getBranchAdminUserIds } from "../services/notification.service.js";
 
@@ -357,6 +360,42 @@ router.post("/:id/transition", requireAuth, requireMinRole("EMPLOYEE"), [
         console.error("[Notifications] Document transition notify error:", notifErr.message);
       }
     })();
+
+    // Fire-and-forget: generate the official notarized PDF certificate once
+    // a document actually reaches 'notarised' — never blocks the transition
+    // response, and a failure here doesn't undo the status change (staff can
+    // retry by re-fetching; the seal_code/notarised_at are already durable).
+    if (status === "notarised") {
+      (async () => {
+        try {
+          const full = await getDocumentById(document.id, tenantId);
+          if (!full) return;
+
+          const pdfBuffer = await generateNotaryCertificate(full, tenantId);
+
+          const upload = await createFileUpload({
+            tenantId,
+            uploadedBy: req.user!.sub,
+            originalName: `${full.document_number}-certificate.pdf`,
+            mimeType: "application/pdf",
+            contentBase64: pdfBuffer.toString("base64"),
+            category: "notary_certificate",
+            branchId: full.branch_id,
+            customerId: full.customer_id ?? undefined,
+            documentId: full.id,
+          });
+
+          await attachCertificateFile(full.id, tenantId, {
+            url: `/api/uploads/${upload.id}/download`,
+            sizeBytes: upload.size_bytes,
+            mimeType: upload.mime_type,
+            hash: upload.file_hash ?? "",
+          });
+        } catch (certErr: any) {
+          console.error("[Certificates] Generation error:", certErr.message);
+        }
+      })();
+    }
 
     res.json({
       message: `Document moved to '${status}'`,

@@ -477,6 +477,20 @@ export async function transitionDocumentStatus(
   return rows[0];
 }
 
+// ─── Attach a generated certificate file to a notarised document ──────────
+export async function attachCertificateFile(
+  documentId: string,
+  tenantId: string,
+  file: { url: string; sizeBytes: number; mimeType: string; hash: string }
+): Promise<void> {
+  await query(
+    `UPDATE documents
+     SET file_url = $3, file_size_bytes = $4, file_mime_type = $5, file_hash = $6, updated_at = NOW()
+     WHERE id = $1 AND tenant_id = $2`,
+    [documentId, tenantId, file.url, file.sizeBytes, file.mimeType, file.hash]
+  );
+}
+
 // ─── Soft delete ───────────────────────────────────────────────────────────────
 
 export async function deleteDocument(

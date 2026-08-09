@@ -1261,12 +1261,13 @@ export default function CustomerPortal({
                               [View]
                             </button>
                             <button 
-                              onClick={(e) => {
+                              onClick={async (e) => {
                                 e.stopPropagation();
-                                if (doc.file_url) {
-                                  window.open(doc.file_url, "_blank");
+                                const uploadIdMatch = doc.file_url?.match(/\/api\/uploads\/([^/]+)\/download/);
+                                if (uploadIdMatch) {
+                                  await downloadUploadedFile(uploadIdMatch[1], `${doc.document_number}-certificate.pdf`);
                                 } else {
-                                  alert("PDF file not yet attached. View the document content in the detail panel.");
+                                  alert("Certificate PDF not yet generated for this document. It's created automatically once notarised.");
                                 }
                               }}
                               className="text-emerald-700 hover:underline px-1 font-sans"

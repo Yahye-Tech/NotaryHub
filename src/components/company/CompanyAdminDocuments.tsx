@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { NotaryDocument, Customer } from "../../types";
 import { documentsApi, customersApi } from "../../api/documents.api";
+import { uploadsApi } from "../../api/uploads.api";
 import { Modal, CustomerForm, type CustomerFormData } from "../FormComponents";
 import { ApiException } from "../../api/client";
 
@@ -70,6 +71,29 @@ export default function CompanyAdminDocuments({ branches = [], userRole = "COMPA
   const [showRejectModal, setShowRejectModal]      = useState(false);
   const [rejectionReason, setRejectionReason]      = useState("");
   const [pendingTransition, setPendingTransition]  = useState<string | null>(null);
+  const [downloadingCert, setDownloadingCert]      = useState(false);
+
+  const downloadCertificate = async (fileUrl: string | null, documentNumber: string) => {
+    const uploadIdMatch = fileUrl?.match(/\/api\/uploads\/([^/]+)\/download/);
+    if (!uploadIdMatch) {
+      alert("Certificate PDF not yet generated for this document.");
+      return;
+    }
+    setDownloadingCert(true);
+    try {
+      const blob = await uploadsApi.download(uploadIdMatch[1]);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${documentNumber}-certificate.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(err instanceof ApiException ? err.message : "Failed to download certificate.");
+    } finally {
+      setDownloadingCert(false);
+    }
+  };
 
   // AI generator
   const [showCreator, setShowCreator]   = useState(false);
@@ -543,13 +567,23 @@ export default function CompanyAdminDocuments({ branches = [], userRole = "COMPA
               )}
 
               {selectedDoc.status === "notarised" && (
-                <div className="mt-3 flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-lg p-2.5 text-xs text-emerald-700">
-                  <CheckCircle2 className="w-4 h-4 shrink-0" />
-                  <span>
-                    Notarised on {selectedDoc.notarised_at
-                      ? new Date(selectedDoc.notarised_at).toLocaleDateString()
-                      : "—"} · Seal: {selectedDoc.seal_code}
-                  </span>
+                <div className="mt-3 flex items-center justify-between gap-2 bg-emerald-50 border border-emerald-200 rounded-lg p-2.5 text-xs text-emerald-700">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>
+                      Notarised on {selectedDoc.notarised_at
+                        ? new Date(selectedDoc.notarised_at).toLocaleDateString()
+                        : "—"} · Seal: {selectedDoc.seal_code}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => downloadCertificate(selectedDoc.file_url, selectedDoc.document_number)}
+                    disabled={downloadingCert}
+                    className="shrink-0 flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg transition"
+                  >
+                    {downloadingCert ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowDownToLine className="w-3 h-3" />}
+                    Certificate
+                  </button>
                 </div>
               )}
 
