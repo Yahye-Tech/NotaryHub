@@ -1,16 +1,17 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-pg_isready -h 127.0.0.1 > /dev/null 2>&1 || pg_ctlcluster 16 main start > /dev/null 2>&1
-sleep 1
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/scripts/test-env.sh"
+
 
 # Clean state then re-seed with correct data
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
-  -f /home/claude/notaryhub/test_setup.sql 2>/dev/null
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
-  -f /home/claude/notaryhub/src/db/schema_tenants.sql 2>/dev/null
+psql_test -q \
+  -f $TEST_ROOT/test_setup.sql 2>/dev/null
+psql_test -q \
+  -f $TEST_ROOT/src/db/schema_tenants.sql 2>/dev/null
 echo "DB seeded."  
 
-cd /home/claude/notaryhub
+cd $TEST_ROOT
 NODE_ENV=production API_ONLY=true TEST_SKIP_RATE_LIMIT=true npx tsx server.ts > /tmp/srv.log 2>&1 &
 SRV=$!
 for i in $(seq 1 20); do
@@ -226,28 +227,28 @@ check "5c unauthenticated employees request = 401" "$R" "UNAUTHENTICATED"
 echo "=== BLOCK 6: DATABASE INTEGRITY ==="
 
 # Verify hierarchy is intact in DB
-HIERARCHY=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+HIERARCHY=$(psql_test -Atc \
   "SELECT COUNT(*) FROM employees e
    JOIN branches b ON e.branch_id = b.id
-   JOIN tenants t ON b.tenant_id = t.tenant_id
+   JOIN tenants t ON b.tenant_id = t.id
    WHERE e.tenant_id = b.tenant_id
    AND b.tenant_id = t.id;" 2>/dev/null)
 
 # Simpler check: employees reference valid branches and tenants
-ORPHANED=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+ORPHANED=$(psql_test -Atc \
   "SELECT COUNT(*) FROM employees e
    WHERE NOT EXISTS (SELECT 1 FROM branches b WHERE b.id = e.branch_id)
    OR NOT EXISTS (SELECT 1 FROM tenants t WHERE t.id = e.tenant_id);" 2>/dev/null | tr -d ' \n')
 [ "$ORPHANED" = "0" ] && { echo "  PASS: 6a no orphaned employee records"; PASS=$((PASS+1)); } \
                        || { echo "  FAIL: 6a orphaned records found ($ORPHANED)"; FAIL=$((FAIL+1)); }
 
-AUDIT=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+AUDIT=$(psql_test -Atc \
   "SELECT COUNT(*) FROM auth_audit_log WHERE action LIKE 'TENANT_%' OR action LIKE 'BRANCH_%' OR action LIKE 'EMPLOYEE_%';" \
   2>/dev/null | tr -d ' \n')
 [ "$AUDIT" -gt "0" ] && { echo "  PASS: 6b multi-tenant ops in audit log ($AUDIT events)"; PASS=$((PASS+1)); } \
                       || { echo "  FAIL: 6b no multi-tenant audit events"; FAIL=$((FAIL+1)); }
 
-ACTIONS=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+ACTIONS=$(psql_test -Atc \
   "SELECT DISTINCT action FROM auth_audit_log ORDER BY action;" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
 echo "  INFO: All audit actions: $ACTIONS"
 

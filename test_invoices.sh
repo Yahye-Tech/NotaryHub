@@ -1,20 +1,19 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-pg_isready -h 127.0.0.1 > /dev/null 2>&1 || pg_ctlcluster 16 main start > /dev/null 2>&1
-sleep 1
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/scripts/test-env.sh"
 
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
-  -f /home/claude/notaryhub/test_setup.sql 2>/dev/null
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
-  -f /home/claude/notaryhub/src/db/schema_tenants.sql 2>/dev/null
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
-  -f /home/claude/notaryhub/src/db/schema_full.sql 2>/dev/null
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
+psql_test -q \
+  -f $TEST_ROOT/test_setup.sql 2>/dev/null
+psql_test -q \
+  -f $TEST_ROOT/src/db/schema_tenants.sql 2>/dev/null
+psql_test -q \
+  -f $TEST_ROOT/src/db/schema_full.sql 2>/dev/null
+psql_test -q \
   -c "DELETE FROM tenant_permissions; DELETE FROM invoice_items; DELETE FROM invoices;" 2>/dev/null
 echo "DB seeded."
 
-cd /home/claude/notaryhub
+cd $TEST_ROOT
 NODE_ENV=production API_ONLY=true TEST_SKIP_RATE_LIMIT=true npx tsx server.ts > /tmp/srv.log 2>&1 &
 SRV=$!
 for i in $(seq 1 20); do
@@ -47,7 +46,7 @@ VANCE_TOKEN=$(get_token "m.vance@bosaso-notary.com" "Admin@2026!")
 
 BOSASO_MAIN_BRANCH="135aa207-1cc2-4417-9bc0-b68c3ae9cf69"
 
-CUSTOMER_ID=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+CUSTOMER_ID=$(psql_test -Atc \
   "SELECT id FROM customers WHERE full_name = 'Hodan Jama' LIMIT 1;")
 
 echo "=== BLOCK 1: ROLE GATING ==="
@@ -150,22 +149,22 @@ check "8a EMPLOYEE can create invoices after tenant override grants MANAGE_INVOI
 
 echo "=== BLOCK 9: DATABASE INTEGRITY ==="
 
-ITEM_COUNT=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+ITEM_COUNT=$(psql_test -Atc \
   "SELECT COUNT(*) FROM invoice_items;" 2>/dev/null | tr -d ' \n')
 [ "$ITEM_COUNT" -ge "5" ] && { echo "  PASS: 9a invoice_items persisted ($ITEM_COUNT rows)"; PASS=$((PASS+1)); } \
                           || { echo "  FAIL: 9a invoice_items persisted (got $ITEM_COUNT)"; FAIL=$((FAIL+1)); }
 
-AUDIT=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+AUDIT=$(psql_test -Atc \
   "SELECT COUNT(*) FROM auth_audit_log WHERE action IN ('INVOICE_CREATED','INVOICE_PAID','INVOICE_VOIDED');" 2>/dev/null | tr -d ' \n')
 [ "$AUDIT" -ge "3" ] && { echo "  PASS: 9b invoice actions audit-logged ($AUDIT events)"; PASS=$((PASS+1)); } \
                      || { echo "  FAIL: 9b invoice actions audit-logged (got $AUDIT)"; FAIL=$((FAIL+1)); }
 
-NOTIF=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+NOTIF=$(psql_test -Atc \
   "SELECT COUNT(*) FROM notifications WHERE resource_type = 'invoice';" 2>/dev/null | tr -d ' \n')
 [ "$NOTIF" -ge "0" ] && { echo "  PASS: 9c invoice notifications table queryable ($NOTIF rows)"; PASS=$((PASS+1)); } \
                      || { echo "  FAIL: 9c invoice notifications table queryable"; FAIL=$((FAIL+1)); }
 
-kill $SRV 2>/dev/null
+kill $SRV 2>/dev/null || true
 
 echo ""
 echo "============================================"

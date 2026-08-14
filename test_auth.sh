@@ -1,17 +1,15 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Ensure postgres is running
-pg_isready -h 127.0.0.1 > /dev/null 2>&1 || pg_ctlcluster 16 main start > /dev/null 2>&1
-sleep 1
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/scripts/test-env.sh"
 
 # Clean state from previous runs (uses pre-built SQL file)
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
-  -f /home/claude/notaryhub/test_setup.sql 2>/dev/null
+psql_test -q \
+  -f $TEST_ROOT/test_setup.sql 2>/dev/null
 echo "DB cleaned."
 
 # Start server
-cd /home/claude/notaryhub
+cd $TEST_ROOT
 NODE_ENV=production API_ONLY=true TEST_SKIP_RATE_LIMIT=true npx tsx server.ts > /tmp/srv.log 2>&1 &
 SRV=$!
 for i in $(seq 1 20); do
@@ -63,7 +61,7 @@ R=$(curl -s -X POST "$BASE/login" -H "Content-Type: application/json" \
 check "2a login blocked before email verification" "$R" "EMAIL_NOT_VERIFIED"
 
 # Activate user (simulates clicking email link)
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
+psql_test -q \
   -c "UPDATE users SET email_verified=TRUE, status='active' WHERE email='ahmed@test.local';"
 
 # ── BLOCK 3: LOGIN - VERIFIED USER ─────────────────────────────────────────
@@ -119,7 +117,7 @@ check "5d no cookie at all = NO_REFRESH_TOKEN" "$R" "NO_REFRESH_TOKEN"
 
 # ── BLOCK 6: ACCOUNT LOCKOUT ───────────────────────────────────────────────
 echo "=== BLOCK 6: ACCOUNT LOCKOUT ==="
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q -c "
+psql_test -q -c "
   INSERT INTO users (email,password_hash,role,status,full_name,email_verified)
   VALUES ('locktest@test.local','\$2a\$12\$LQv3c1yqBWVHxkd0LHAkCOYz6TiGniMnLzVmqVKCGhXLTTx.MR6FS','EMPLOYEE','active','Lock Test',TRUE)
   ON CONFLICT DO NOTHING;"
@@ -131,7 +129,7 @@ R=$(curl -s -X POST "$BASE/login" -H "Content-Type: application/json" \
   -d '{"email":"locktest@test.local","password":"Wrong@9999!"}')
 check "6a account locks after 5 failures" "$R" "ACCOUNT_LOCKED"
 
-DB_LOCK=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+DB_LOCK=$(psql_test -Atc \
   "SELECT locked_until IS NOT NULL FROM users WHERE email='locktest@test.local';" 2>/dev/null)
 [ "$DB_LOCK" = "t" ] && { echo "  PASS: 6b locked_until written to DB"; PASS=$((PASS+1)); } \
                      || { echo "  FAIL: 6b locked_until not in DB (got: $DB_LOCK)"; FAIL=$((FAIL+1)); }
@@ -151,7 +149,7 @@ R=$(curl -s -X POST "$BASE/reset-password" -H "Content-Type: application/json" \
 check "7c invalid reset token rejected" "$R" "TOKEN_INVALID"
 
 # Insert a known raw token for ahmed@test.local (64-char hex = 32 bytes)
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q -c "
+psql_test -q -c "
   INSERT INTO one_time_tokens (user_id, token_hash, type, expires_at)
   SELECT id,
     encode(sha256('aabbccdd1234567890abcdef1234567890abcdef1234567890abcdef12345678'::bytea),'hex'),
@@ -211,32 +209,32 @@ check "9c SUPER_ADMIN seed user logs in with correct role" "$ADMIN_BODY" "SUPER_
 
 # ── BLOCK 10: DATABASE INTEGRITY ───────────────────────────────────────────
 echo "=== BLOCK 10: DATABASE INTEGRITY ==="
-USERS=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+USERS=$(psql_test -Atc \
   "SELECT COUNT(*) FROM users;" 2>/dev/null | tr -d ' \n')
 [ "$USERS" -gt "0" ] && { echo "  PASS: 10a users table ($USERS rows)"; PASS=$((PASS+1)); } \
                       || { echo "  FAIL: 10a users table empty"; FAIL=$((FAIL+1)); }
 
-RT=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+RT=$(psql_test -Atc \
   "SELECT COUNT(*) FROM refresh_tokens;" 2>/dev/null | tr -d ' \n')
 [ "$RT" -gt "0" ] && { echo "  PASS: 10b refresh_tokens ($RT rows)"; PASS=$((PASS+1)); } \
                    || { echo "  FAIL: 10b refresh_tokens empty"; FAIL=$((FAIL+1)); }
 
-AUDIT=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+AUDIT=$(psql_test -Atc \
   "SELECT COUNT(*) FROM auth_audit_log;" 2>/dev/null | tr -d ' \n')
 [ "$AUDIT" -gt "0" ] && { echo "  PASS: 10c audit_log ($AUDIT events)"; PASS=$((PASS+1)); } \
                       || { echo "  FAIL: 10c audit_log empty"; FAIL=$((FAIL+1)); }
 
-REVOKED=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+REVOKED=$(psql_test -Atc \
   "SELECT COUNT(*) FROM refresh_tokens WHERE revoked=TRUE;" 2>/dev/null | tr -d ' \n')
 [ "$REVOKED" -gt "0" ] && { echo "  PASS: 10d revoked tokens ($REVOKED)"; PASS=$((PASS+1)); } \
                         || { echo "  FAIL: 10d no revoked tokens"; FAIL=$((FAIL+1)); }
 
-FK=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+FK=$(psql_test -Atc \
   "SELECT COUNT(*) FROM refresh_tokens rt JOIN users u ON rt.user_id=u.id;" 2>/dev/null | tr -d ' \n')
 [ "$FK" -gt "0" ] && { echo "  PASS: 10e FK relationships intact ($FK joined rows)"; PASS=$((PASS+1)); } \
                    || { echo "  FAIL: 10e FK join failed"; FAIL=$((FAIL+1)); }
 
-ACTIONS=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+ACTIONS=$(psql_test -Atc \
   "SELECT DISTINCT action FROM auth_audit_log ORDER BY action;" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
 echo "  INFO: Audit actions: $ACTIONS"
 

@@ -1,19 +1,18 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-pg_isready -h 127.0.0.1 > /dev/null 2>&1 || pg_ctlcluster 16 main start > /dev/null 2>&1
-sleep 1
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/scripts/test-env.sh"
 
 # Clean state then re-seed with correct data (same pattern as other suites)
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
-  -f /home/claude/notaryhub/test_setup.sql 2>/dev/null
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
-  -f /home/claude/notaryhub/src/db/schema_tenants.sql 2>/dev/null
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
+psql_test -q \
+  -f $TEST_ROOT/test_setup.sql 2>/dev/null
+psql_test -q \
+  -f $TEST_ROOT/src/db/schema_tenants.sql 2>/dev/null
+psql_test -q \
   -c "DELETE FROM tenant_permissions;" 2>/dev/null
 echo "DB seeded."
 
-cd /home/claude/notaryhub
+cd $TEST_ROOT
 NODE_ENV=production API_ONLY=true TEST_SKIP_RATE_LIMIT=true npx tsx server.ts > /tmp/srv.log 2>&1 &
 SRV=$!
 for i in $(seq 1 20); do
@@ -156,17 +155,17 @@ check "6b Bosaso sees its own override" "$R" "\"EMPLOYEE\":{\"CREATE_DOCUMENT\":
 
 echo "=== BLOCK 7: DATABASE INTEGRITY ==="
 
-ROWS=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+ROWS=$(psql_test -Atc \
   "SELECT COUNT(*) FROM tenant_permissions;" 2>/dev/null | tr -d ' \n')
 [ "$ROWS" -ge "2" ] && { echo "  PASS: 7a tenant_permissions rows persisted ($ROWS rows)"; PASS=$((PASS+1)); } \
                      || { echo "  FAIL: 7a tenant_permissions rows persisted (got $ROWS)"; FAIL=$((FAIL+1)); }
 
-AUDIT=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+AUDIT=$(psql_test -Atc \
   "SELECT COUNT(*) FROM auth_audit_log WHERE action IN ('PERMISSION_UPDATED','PERMISSION_RESET');" 2>/dev/null | tr -d ' \n')
 [ "$AUDIT" -ge "1" ] && { echo "  PASS: 7b permission changes audit-logged ($AUDIT events)"; PASS=$((PASS+1)); } \
                       || { echo "  FAIL: 7b permission changes audit-logged (got $AUDIT)"; FAIL=$((FAIL+1)); }
 
-kill $SRV 2>/dev/null
+kill $SRV 2>/dev/null || true
 
 echo ""
 echo "============================================"

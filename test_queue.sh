@@ -1,23 +1,23 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-pg_isready -h 127.0.0.1 > /dev/null 2>&1 || pg_ctlcluster 16 main start > /dev/null 2>&1
-sleep 1
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/scripts/test-env.sh"
 
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
-  -f /home/claude/notaryhub/test_setup.sql 2>/dev/null
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
-  -f /home/claude/notaryhub/src/db/schema_tenants.sql 2>/dev/null
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
-  -f /home/claude/notaryhub/src/db/schema_full.sql 2>/dev/null
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
-  -f /home/claude/notaryhub/src/db/schema_queue.sql 2>/dev/null
+psql_test -q \
+  -f $TEST_ROOT/test_setup.sql 2>/dev/null
+psql_test -q \
+  -f $TEST_ROOT/src/db/schema_tenants.sql 2>/dev/null
+psql_test -q \
+  -f $TEST_ROOT/src/db/schema_full.sql 2>/dev/null
+psql_test -q \
+  -f $TEST_ROOT/src/db/schema_queue.sql 2>/dev/null
 
 # Assign counter 3 to Vance
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
+psql_test -q \
   -c "UPDATE employees SET assigned_counter=3 WHERE user_id='bc505fec-32be-472d-bc38-0799486f31b1';" 2>/dev/null
 
 # Create nocounter employee upfront
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q -c "
+psql_test -q -c "
   INSERT INTO users (email,password_hash,role,status,tenant_id,full_name,email_verified)
   VALUES ('nocounter@bosaso-notary.com','\$2b\$12\$Ej06nmGMe.yEw74lepB7n.VReyborEKRWdIFh12SWYXtsqX5mULOi',
     'EMPLOYEE','active','886c9f73-82a4-4e75-a023-cc4802712c52','No Counter Employee',TRUE)
@@ -33,7 +33,7 @@ echo "DB seeded."
 
 start_server() {
   pkill -f "tsx server.ts" 2>/dev/null; sleep 1
-  cd /home/claude/notaryhub
+  cd $TEST_ROOT
   NODE_ENV=production API_ONLY=true TEST_SKIP_RATE_LIMIT=true npx tsx server.ts > /tmp/srv.log 2>&1 &
   echo $! > /tmp/srvpid
   for i in $(seq 1 20); do
@@ -135,7 +135,7 @@ R=$(curl -s -X POST "$BASE/api/queue/call-next" \
   -H "Authorization: Bearer $VANCE_TOKEN" -H "Content-Type: application/json" -d '{}')
 check "6a call-next succeeds while counter has serving ticket" "$R" '"status":"calling"'
 
-T2_STATUS=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+T2_STATUS=$(psql_test -Atc \
   "SELECT status FROM queue_tickets WHERE id='$T2';" 2>/dev/null | tr -d ' \n')
 [ "$T2_STATUS" = "completed" ] && { echo "  PASS: 6b previous serving auto-completed in DB"; PASS=$((PASS+1)); } \
                                 || { echo "  FAIL: 6b expected completed, got $T2_STATUS"; FAIL=$((FAIL+1)); }
@@ -162,14 +162,14 @@ check "7b cross-tenant ticket action fails" "$R" "INVALID_TRANSITION"
 echo "=== BLOCK 8: NO COUNTER ASSIGNED ==="
 
 # Complete any leftover active tickets
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q -c "
+psql_test -q -c "
   UPDATE queue_tickets SET status='completed', completed_at=NOW()
   WHERE branch_id='$BOSASO_BRANCH'
     AND status IN ('waiting','calling','serving')
     AND ticket_date=CURRENT_DATE;" 2>/dev/null
 
 # Ensure assigned_counter is NULL for nocounter employee
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q -c "
+psql_test -q -c "
   UPDATE employees SET assigned_counter=NULL
   WHERE user_id=(SELECT id FROM users WHERE email='nocounter@bosaso-notary.com');" 2>/dev/null
 
@@ -194,18 +194,18 @@ R=$(curl -s -X POST "$BASE/api/queue/call-next" \
 check "8b explicit counter override works" "$R" '"called_counter":5'
 
 echo "=== BLOCK 9: DATABASE INTEGRITY ==="
-TICKET_COUNT=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+TICKET_COUNT=$(psql_test -Atc \
   "SELECT COUNT(*) FROM queue_tickets WHERE branch_id='$BOSASO_BRANCH';" 2>/dev/null | tr -d ' \n')
 [ "$TICKET_COUNT" -ge "3" ] && { echo "  PASS: 9a queue_tickets persisted ($TICKET_COUNT rows)"; PASS=$((PASS+1)); } \
                              || { echo "  FAIL: 9a expected >=3, got $TICKET_COUNT"; FAIL=$((FAIL+1)); }
 
-UNIQUE_CHECK=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+UNIQUE_CHECK=$(psql_test -Atc \
   "SELECT COUNT(*) = COUNT(DISTINCT ticket_number) FROM queue_tickets WHERE branch_id='$BOSASO_BRANCH';" \
   2>/dev/null | tr -d ' \n')
 [ "$UNIQUE_CHECK" = "t" ] && { echo "  PASS: 9b all ticket_numbers unique per branch"; PASS=$((PASS+1)); } \
                            || { echo "  FAIL: 9b duplicate ticket_numbers found"; FAIL=$((FAIL+1)); }
 
-AUDIT_COUNT=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+AUDIT_COUNT=$(psql_test -Atc \
   "SELECT COUNT(*) FROM auth_audit_log WHERE action LIKE 'QUEUE_%';" 2>/dev/null | tr -d ' \n')
 [ "$AUDIT_COUNT" -gt "0" ] && { echo "  PASS: 9c queue actions in audit_log ($AUDIT_COUNT events)"; PASS=$((PASS+1)); } \
                             || { echo "  FAIL: 9c no queue audit events"; FAIL=$((FAIL+1)); }

@@ -1,14 +1,10 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Ensure postgres is running
-pg_isready -h 127.0.0.1 > /dev/null 2>&1 || pg_ctlcluster 16 main start > /dev/null 2>&1
-sleep 1
-
-DB="PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q"
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/scripts/test-env.sh"
 
 # Clean state from previous runs
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q -c "
+psql_test -q -c "
   DELETE FROM notifications WHERE user_id IN (SELECT id FROM users WHERE email LIKE '%test-notif%');
   DELETE FROM appointments WHERE customer_name = 'Test Notif Customer';
   DELETE FROM queue_tickets WHERE customer_name = 'Test Notif Customer';
@@ -19,9 +15,9 @@ PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q -c 
 echo "DB cleaned."
 
 # Start server
-cd /home/claude/NotaryHub
+cd $TEST_ROOT
 NODE_ENV=production API_ONLY=true TEST_SKIP_RATE_LIMIT=true TEST_SKIP_EMAIL_INIT=true \
-  DATABASE_URL="postgresql://notaryhub:notaryhub_dev_2026@127.0.0.1:5432/notaryhub" \
+  DATABASE_URL="$TEST_DATABASE_URL" \
   JWT_ACCESS_SECRET="test_access_secret" JWT_REFRESH_SECRET="test_refresh_secret" \
   npx tsx server.ts > /tmp/srv_notif.log 2>&1 &
 SRV=$!
@@ -34,6 +30,10 @@ BASE="http://localhost:3000/api"
 TENANT_ID="886c9f73-82a4-4e75-a023-cc4802712c52"
 BRANCH_ID="135aa207-1cc2-4417-9bc0-b68c3ae9cf69"
 PASS=0; FAIL=0
+
+# The queue suite runs earlier in CI and may leave waiting tickets behind.
+# Remove branch-local tickets so this suite tests the newly checked-in customer.
+psql_test -q -c "DELETE FROM queue_tickets WHERE branch_id = '$BRANCH_ID';" 2>/dev/null
 
 check() {
   if echo "$2" | grep -q "$3"; then
@@ -59,7 +59,7 @@ echo "=== BLOCK 2: APPOINTMENT NOTIFICATIONS ==="
 curl -s -X POST "$BASE/auth/register" -H "Content-Type: application/json" \
   -d "{\"email\":\"test-notif.customer@example.com\",\"password\":\"TestPass@2026!\",\"fullName\":\"Test Notif Customer\",\"role\":\"CUSTOMER\",\"tenantId\":\"$TENANT_ID\"}" > /dev/null
 
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q -c \
+psql_test -q -c \
   "UPDATE users SET email_verified = TRUE WHERE email = 'test-notif.customer@example.com';" 2>/dev/null
 
 CUSTOMER_TOKEN=$(curl -s -X POST "$BASE/auth/login" -H "Content-Type: application/json" \
@@ -124,11 +124,19 @@ CHECKIN_RESP=$(curl -s -X POST "$BASE/queue/check-in" -H "Authorization: Bearer 
   -d "{\"branchId\":\"$BRANCH_ID\",\"customerId\":\"$CUSTOMER_ID\",\"customerName\":\"Test Notif Customer\",\"serviceType\":\"Document Notarization\"}")
 check "4a queue check-in" "$CHECKIN_RESP" "Customer checked in"
 
-curl -s -X POST "$BASE/queue/call-next" -H "Authorization: Bearer $EMPLOYEE_TOKEN" -H "Content-Type: application/json" \
-  -d "{\"branchId\":\"$BRANCH_ID\",\"counter\":1}" > /dev/null
-sleep 1
-CUSTOMER_NOTIFS3=$(curl -s "$BASE/notifications" -H "Authorization: Bearer $CUSTOMER_TOKEN")
-check "4b customer notified when called to counter" "$CUSTOMER_NOTIFS3" "You've been called"
+CALL_RESP=$(curl -s -X POST "$BASE/queue/call-next" -H "Authorization: Bearer $EMPLOYEE_TOKEN" -H "Content-Type: application/json" \
+  -d "{\"branchId\":\"$BRANCH_ID\",\"counter\":1}")
+check "4b queue call-next succeeds" "$CALL_RESP" "Calling"
+
+CUSTOMER_NOTIFS3=""
+for attempt in $(seq 1 10); do
+  CUSTOMER_NOTIFS3=$(curl -s "$BASE/notifications" -H "Authorization: Bearer $CUSTOMER_TOKEN")
+  if echo "$CUSTOMER_NOTIFS3" | grep -q "You've been called"; then
+    break
+  fi
+  sleep 0.5
+done
+check "4c customer notified when called to counter" "$CUSTOMER_NOTIFS3" "You've been called"
 
 echo ""
 echo "============================================"
