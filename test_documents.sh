@@ -1,18 +1,18 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-pg_isready -h 127.0.0.1 > /dev/null 2>&1 || pg_ctlcluster 16 main start > /dev/null 2>&1
-sleep 1
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/scripts/test-env.sh"
 
 # Clean + re-seed
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
-  -f /home/claude/notaryhub/test_setup.sql 2>/dev/null
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
-  -f /home/claude/notaryhub/src/db/schema_tenants.sql 2>/dev/null
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
-  -f /home/claude/notaryhub/src/db/schema_full.sql 2>/dev/null
+psql_test -q \
+  -f $TEST_ROOT/test_setup.sql 2>/dev/null
+psql_test -q \
+  -f $TEST_ROOT/src/db/schema_tenants.sql 2>/dev/null
+psql_test -q \
+  -f $TEST_ROOT/src/db/schema_full.sql 2>/dev/null
 echo "DB seeded."
 
-cd /home/claude/notaryhub
+cd $TEST_ROOT
 NODE_ENV=production API_ONLY=true TEST_SKIP_RATE_LIMIT=true npx tsx server.ts > /tmp/srv.log 2>&1 &
 SRV=$!
 for i in $(seq 1 20); do
@@ -161,28 +161,28 @@ check "4b cross-tenant customer access blocked" "$R" "NOT_FOUND"
 
 echo "=== BLOCK 5: DATABASE INTEGRITY ==="
 
-DOC_COUNT=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+DOC_COUNT=$(psql_test -Atc \
   "SELECT COUNT(*) FROM documents WHERE tenant_id='886c9f73-82a4-4e75-a023-cc4802712c52';" 2>/dev/null)
 [ "$DOC_COUNT" -ge "2" ] && { echo "  PASS: 5a documents persisted to DB ($DOC_COUNT rows)"; PASS=$((PASS+1)); } \
                           || { echo "  FAIL: 5a expected >=2, got $DOC_COUNT"; FAIL=$((FAIL+1)); }
 
-CUST_COUNT=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+CUST_COUNT=$(psql_test -Atc \
   "SELECT COUNT(*) FROM customers WHERE id='$CUST_ID';" 2>/dev/null)
 [ "$CUST_COUNT" = "1" ] && { echo "  PASS: 5b customer persisted to DB"; PASS=$((PASS+1)); } \
                          || { echo "  FAIL: 5b customer not found in DB"; FAIL=$((FAIL+1)); }
 
-SEAL_CHECK=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+SEAL_CHECK=$(psql_test -Atc \
   "SELECT seal_code FROM documents WHERE id='$DOC_ID';" 2>/dev/null)
 echo "  INFO: seal_code in DB = $SEAL_CHECK"
 [ -n "$SEAL_CHECK" ] && { echo "  PASS: 5c seal_code written to DB"; PASS=$((PASS+1)); } \
                        || { echo "  FAIL: 5c seal_code is empty"; FAIL=$((FAIL+1)); }
 
-AUDIT_COUNT=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+AUDIT_COUNT=$(psql_test -Atc \
   "SELECT COUNT(*) FROM audit_logs WHERE resource_type='document';" 2>/dev/null)
 [ "$AUDIT_COUNT" -gt "0" ] && { echo "  PASS: 5d operational audit_logs written ($AUDIT_COUNT events)"; PASS=$((PASS+1)); } \
                             || { echo "  FAIL: 5d no document audit events"; FAIL=$((FAIL+1)); }
 
-FK_CHECK=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+FK_CHECK=$(psql_test -Atc \
   "SELECT COUNT(*) FROM documents d JOIN customers c ON d.customer_id=c.id WHERE d.id='$DOC_ID';" 2>/dev/null)
 [ "$FK_CHECK" = "1" ] && { echo "  PASS: 5e document-customer FK relationship intact"; PASS=$((PASS+1)); } \
                        || { echo "  FAIL: 5e FK join failed"; FAIL=$((FAIL+1)); }

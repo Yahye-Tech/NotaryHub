@@ -1,18 +1,17 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-pg_isready -h 127.0.0.1 > /dev/null 2>&1 || pg_ctlcluster 16 main start > /dev/null 2>&1
-sleep 1
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/scripts/test-env.sh"
 
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
-  -f /home/claude/notaryhub/test_setup.sql 2>/dev/null
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
-  -f /home/claude/notaryhub/src/db/schema_tenants.sql 2>/dev/null
-PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
+psql_test -q \
+  -f $TEST_ROOT/test_setup.sql 2>/dev/null
+psql_test -q \
+  -f $TEST_ROOT/src/db/schema_tenants.sql 2>/dev/null
+psql_test -q \
   -c "UPDATE platform_settings SET ai_ocr_enabled = TRUE, ai_doc_generation_enabled = TRUE WHERE id = 1;" 2>/dev/null
 echo "DB seeded."
 
-cd /home/claude/notaryhub
+cd $TEST_ROOT
 NODE_ENV=production API_ONLY=true TEST_SKIP_RATE_LIMIT=true npx tsx server.ts > /tmp/srv.log 2>&1 &
 SRV=$!
 for i in $(seq 1 20); do
@@ -111,19 +110,19 @@ R=$(curl -s -X PATCH "$BASE/api/platform-settings" \
   -d '{"aiOcrEnabled":false}')
 check "5b COMPANY_ADMIN cannot modify platform settings" "$R" "FORBIDDEN"
 
-AUDIT=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+AUDIT=$(psql_test -Atc \
   "SELECT COUNT(*) FROM auth_audit_log WHERE action = 'PLATFORM_SETTINGS_UPDATED';" 2>/dev/null | tr -d ' \n')
 [ "$AUDIT" -ge "4" ] && { echo "  PASS: 5c platform settings changes audit-logged ($AUDIT events)"; PASS=$((PASS+1)); } \
                      || { echo "  FAIL: 5c platform settings changes audit-logged (got $AUDIT)"; FAIL=$((FAIL+1)); }
 
 echo "=== BLOCK 6: SINGLETON ROW INTEGRITY ==="
 
-ROWS=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+ROWS=$(psql_test -Atc \
   "SELECT COUNT(*) FROM platform_settings;" 2>/dev/null | tr -d ' \n')
 [ "$ROWS" -eq "1" ] && { echo "  PASS: 6a exactly one platform_settings row (singleton enforced)"; PASS=$((PASS+1)); } \
                      || { echo "  FAIL: 6a exactly one platform_settings row (got $ROWS)"; FAIL=$((FAIL+1)); }
 
-kill $SRV 2>/dev/null
+kill $SRV 2>/dev/null || true
 
 echo ""
 echo "============================================"

@@ -36,6 +36,7 @@ import { requireAuth, requireMinRole } from "./src/middleware/auth.middleware.js
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "3000", 10);
+const isVercelRuntime = process.env.VERCEL === "1";
 
 // ─── CORS ─────────────────────────────────────────────────────────────────
 app.use(cors({
@@ -51,6 +52,42 @@ app.use(express.urlencoded({ extended: true }));
 
 // ─── Cookie parsing (required for refresh token httpOnly cookie) ──────────
 app.use(cookieParser());
+
+// Vercel does not run the local `startServer()` listener. Initialize services
+// lazily once per warm function instance before handling database-backed API
+// requests, while leaving the health endpoint responsible for its own DB check.
+let serverlessInit: Promise<void> | null = null;
+
+async function ensureServerlessServices(): Promise<void> {
+  if (!serverlessInit) {
+    serverlessInit = (async () => {
+      await pool.query("SELECT 1");
+      if (process.env.TEST_SKIP_EMAIL_INIT !== "true") {
+        await initEmailService();
+      }
+    })();
+  }
+  await serverlessInit;
+}
+
+if (isVercelRuntime) {
+  app.use(async (req, res, next) => {
+    if (req.path === "/api/health") {
+      next();
+      return;
+    }
+    try {
+      await ensureServerlessServices();
+      next();
+    } catch (error: any) {
+      console.error("[Serverless] Runtime initialization failed:", error.message);
+      res.status(503).json({
+        error: "SERVICE_UNAVAILABLE",
+        message: "NotaryHub services are not ready.",
+      });
+    }
+  });
+}
 
 // ─── Health check ─────────────────────────────────────────────────────────
 app.get("/api/health", async (_req, res) => {
@@ -261,7 +298,7 @@ app.post(
 );
 
 // ─── Boot ─────────────────────────────────────────────────────────────────
-async function startServer() {
+export async function startServer() {
   // 1. Verify database connection
   try {
     await pool.query("SELECT 1");
@@ -313,5 +350,8 @@ async function startServer() {
   });
 }
 
-startServer();
+if (!isVercelRuntime) {
+  startServer();
+}
+
 export default app;

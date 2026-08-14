@@ -4,6 +4,13 @@
 
 let accessToken: string | null = null;
 
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
+
+function apiUrl(path: string): string {
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${API_BASE_URL}${path}`;
+}
+
 export function setAccessToken(token: string | null): void {
   accessToken = token;
 }
@@ -45,7 +52,7 @@ async function apiFetch<T>(
     headers["Authorization"] = `Bearer ${accessToken}`;
   }
 
-  const response = await fetch(path, { ...options, headers, credentials: "include" });
+  const response = await fetch(apiUrl(path), { ...options, headers, credentials: "include" });
 
   // If 401 and haven't retried — attempt token refresh
   if (response.status === 401 && !retried) {
@@ -76,7 +83,7 @@ async function apiFetch<T>(
 
 async function tryRefreshToken(): Promise<boolean> {
   try {
-    const res = await fetch("/api/auth/refresh", {
+    const res = await fetch(apiUrl("/api/auth/refresh"), {
       method: "POST",
       credentials: "include",
     });
