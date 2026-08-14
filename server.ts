@@ -28,6 +28,8 @@ import uploadRoutes from "./src/routes/upload.routes.js";
 import notificationRoutes from "./src/routes/notification.routes.js";
 import permissionsRoutes from "./src/routes/permissions.routes.js";
 import invoiceRoutes from "./src/routes/invoice.routes.js";
+import platformSettingsRoutes from "./src/routes/platform-settings.routes.js";
+import { getPlatformSettings } from "./src/services/platform-settings.service.js";
 
 // ─── RBAC middleware (for protecting existing routes) ─────────────────────
 import { requireAuth, requireMinRole } from "./src/middleware/auth.middleware.js";
@@ -84,6 +86,7 @@ app.use("/api/uploads", uploadRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/permissions", permissionsRoutes);
 app.use("/api/invoices", invoiceRoutes);
+app.use("/api/platform-settings", platformSettingsRoutes);
 
 // ─── Gemini AI client ─────────────────────────────────────────────────────
 const ai = new GoogleGenAI({
@@ -102,7 +105,14 @@ app.post(
   requireMinRole("EMPLOYEE"),
   async (req, res) => {
     try {
-      const { templateType, parties, jurisdiction, specialClauses, customPrompt } = req.body;
+      const platformSettings = await getPlatformSettings();
+      if (!platformSettings.aiDocGenerationEnabled) {
+        return res.status(403).json({
+          success: false,
+          error: "FEATURE_DISABLED",
+          message: "AI document drafting has been disabled platform-wide by a super admin.",
+        });
+      }
 
       if (!process.env.GEMINI_API_KEY) {
         return res.status(503).json({
@@ -110,6 +120,8 @@ app.post(
           error: "GEMINI_API_KEY is not configured.",
         });
       }
+
+      const { templateType, parties, jurisdiction, specialClauses, customPrompt } = req.body;
 
       const systemPrompt = `You are a professional legal notary assistant drafting legally-sound notary deeds, contracts, powers of attorney, and affidavits. 
 Output dry, formal, properly drafted legal documents in clean markdown. No comments, greetings, or self-explanations. 
@@ -193,6 +205,15 @@ app.post(
 
       if (!imageBase64) {
         return res.status(400).json({ success: false, error: "Missing imageBase64 data." });
+      }
+
+      const platformSettings = await getPlatformSettings();
+      if (!platformSettings.aiOcrEnabled) {
+        return res.status(403).json({
+          success: false,
+          error: "FEATURE_DISABLED",
+          message: "AI OCR scanning has been disabled platform-wide by a super admin.",
+        });
       }
 
       if (!process.env.GEMINI_API_KEY) {

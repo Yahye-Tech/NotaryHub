@@ -33,6 +33,7 @@ interface SuperAdminPortalProps {
   documents: NotaryDocument[];
   featureFlags: Record<string, boolean>;
   onToggleFeature: (flag: string) => void;
+  featureFlagsSaving?: boolean;
   onLogout: () => void;
   permissionsMatrix: PermissionsMatrix;
   onUpdatePermissions: (matrix: PermissionsMatrix) => void;
@@ -51,6 +52,7 @@ export default function SuperAdminPortal({
   documents,
   featureFlags,
   onToggleFeature,
+  featureFlagsSaving = false,
   onLogout,
   permissionsMatrix,
   onUpdatePermissions
@@ -1387,14 +1389,14 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
 
                     <div className="pt-3.5 border-t border-slate-100">
                       <span className="block text-[10.5px] font-mono text-slate-400 uppercase font-bold tracking-wider mb-2.5">Global Feature Switches</span>
-                      <p className="text-[10px] text-amber-600 mb-2">Preview only — these switches aren't yet wired to gate the actual OCR/AI-drafting features for employees.</p>
+                      <p className="text-[10px] text-emerald-600 mb-2">Live — enforced server-side on every OCR and AI-drafting request, platform-wide.</p>
                       <div className="space-y-2.5">
                         <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl">
                           <div>
                             <span className="font-bold text-slate-800 block">Gemini OCR Compliance Scan</span>
                             <span className="text-[10px] text-slate-400 font-mono">Processes government passports at lobby desk scanners</span>
                           </div>
-                          <button type="button" onClick={() => onToggleFeature("ocr")} className="outline-none">
+                          <button type="button" disabled={featureFlagsSaving} onClick={() => onToggleFeature("ocr")} className="outline-none disabled:opacity-40">
                             {featureFlags.ocr ? (
                               <ToggleRight className="w-8 h-8 text-blue-600" />
                             ) : (
@@ -1408,7 +1410,7 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
                             <span className="font-bold text-slate-800 block">Gemini AI Legal Contracts Drafter</span>
                             <span className="text-[10px] text-slate-400 font-mono">Generates professional notary contracts from guidelines</span>
                           </div>
-                          <button type="button" onClick={() => onToggleFeature("docGen")} className="outline-none">
+                          <button type="button" disabled={featureFlagsSaving} onClick={() => onToggleFeature("docGen")} className="outline-none disabled:opacity-40">
                             {featureFlags.docGen ? (
                               <ToggleRight className="w-8 h-8 text-blue-600" />
                             ) : (

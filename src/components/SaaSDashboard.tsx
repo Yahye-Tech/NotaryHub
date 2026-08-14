@@ -16,6 +16,7 @@ import PermissionsConfig, { PermissionsMatrix } from "./PermissionsConfig";
 import { authApi } from "../api/auth.api";
 import { tenantsApi, branchesApi, employeesApi } from "../api/tenants.api";
 import { permissionsApi } from "../api/permissions.api";
+import { platformSettingsApi } from "../api/platform-settings.api";
 import { setAccessToken, getAccessToken, ApiException } from "../api/client";
 import type { Tenant, Branch, Employee } from "../api/tenants.api";
 
@@ -356,12 +357,37 @@ export default function SaaSDashboard() {
     },
   ]);
 
-  // Feature flags — real toggle state (session-only preview; not yet enforced
-  // as a gate on the actual OCR/AI-drafting features elsewhere in the app)
+  // Feature flags. ocr/docGen are real, platform-wide, SUPER_ADMIN-managed
+  // switches — fetched from and persisted to /api/platform-settings, and
+  // actually enforced server-side on the Gemini OCR/doc-generation routes.
+  // voiceChime is a pure client-side UI preference (a sound on scan
+  // completion isn't something a backend can meaningfully gate) and stays
+  // local-only, same as before.
   const [featureFlags, setFeatureFlags] = useState({ ocr: true, docGen: true, voiceChime: true });
-  const handleToggleFeature = useCallback((flag: string) => {
-    setFeatureFlags(prev => ({ ...prev, [flag]: !prev[flag as keyof typeof prev] }));
-  }, []);
+  const [featureFlagsSaving, setFeatureFlagsSaving] = useState(false);
+
+  const handleToggleFeature = useCallback(async (flag: string) => {
+    if (flag === "voiceChime") {
+      setFeatureFlags(prev => ({ ...prev, voiceChime: !prev.voiceChime }));
+      return;
+    }
+
+    const nextValue = !featureFlags[flag as keyof typeof featureFlags];
+    setFeatureFlagsSaving(true);
+    try {
+      const update = flag === "ocr" ? { aiOcrEnabled: nextValue } : { aiDocGenerationEnabled: nextValue };
+      const result = await platformSettingsApi.set(update);
+      setFeatureFlags(prev => ({
+        ...prev,
+        ocr: result.settings.aiOcrEnabled,
+        docGen: result.settings.aiDocGenerationEnabled,
+      }));
+    } catch (err) {
+      console.error("[Dashboard] Failed to update platform settings:", err);
+    } finally {
+      setFeatureFlagsSaving(false);
+    }
+  }, [featureFlags]);
 
   // Real RBAC permissions matrix — fetched from /api/permissions on login.
   // Seeded with the same fallback values the backend uses so the UI has a
@@ -411,6 +437,20 @@ export default function SaaSDashboard() {
       setPermissionsMatrix(permRes.matrix);
     } catch (err) {
       console.error("[Dashboard] Failed to load permissions matrix:", err);
+    }
+
+    // Platform-wide AI feature switches — SUPER_ADMIN only, real state.
+    if (user.role === "SUPER_ADMIN") {
+      try {
+        const settingsRes = await platformSettingsApi.get();
+        setFeatureFlags(prev => ({
+          ...prev,
+          ocr: settingsRes.settings.aiOcrEnabled,
+          docGen: settingsRes.settings.aiDocGenerationEnabled,
+        }));
+      } catch (err) {
+        console.error("[Dashboard] Failed to load platform settings:", err);
+      }
     }
   }, []);
 
@@ -763,6 +803,7 @@ export default function SaaSDashboard() {
             documents={[]}
             featureFlags={featureFlags}
             onToggleFeature={handleToggleFeature}
+            featureFlagsSaving={featureFlagsSaving}
             onLogout={handleLogout}
             permissionsMatrix={permissionsMatrix}
             onUpdatePermissions={setPermissionsMatrix}
