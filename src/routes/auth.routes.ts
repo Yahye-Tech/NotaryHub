@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import crypto from "crypto";
 import { validationResult } from "express-validator";
 import rateLimit from "express-rate-limit";
 
@@ -101,13 +102,32 @@ async function buildUserProfile(user: Awaited<ReturnType<typeof findUserById>>) 
 }
 
 const REFRESH_COOKIE = "notaryhub_refresh";
+const CSRF_COOKIE = "notaryhub_csrf";
 const COOKIE_OPTIONS = {
   httpOnly: true,
+  // In production refresh cookies are always Secure and SameSite=Lax.
   secure: process.env.NODE_ENV === "production",
   sameSite: "lax" as const,
   path: "/api/auth",
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
 };
+const CSRF_COOKIE_OPTIONS = {
+  httpOnly: false,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax" as const,
+  path: "/api/auth",
+  maxAge: COOKIE_OPTIONS.maxAge,
+};
+
+function issueCsrfToken(): string {
+  return crypto.randomBytes(32).toString("hex");
+}
+
+function hasValidCsrfToken(req: Request): boolean {
+  const cookieToken = req.cookies?.[CSRF_COOKIE];
+  const headerToken = req.get("X-CSRF-Token");
+  return typeof cookieToken === "string" && cookieToken.length > 0 && cookieToken === headerToken;
+}
 
 // ─── Rate limiters ─────────────────────────────────────────────────────────
 
@@ -308,8 +328,10 @@ router.post("/login", loginLimiter, loginValidator, async (req: Request, res: Re
 
   const rawRefreshToken = await createRefreshToken(user.id, ip, ua);
 
-  // Refresh token → httpOnly cookie
+  // Refresh token → httpOnly cookie; CSRF token is readable by same-origin code
+  // and must be echoed in X-CSRF-Token on refresh requests.
   res.cookie(REFRESH_COOKIE, rawRefreshToken, COOKIE_OPTIONS);
+  res.cookie(CSRF_COOKIE, issueCsrfToken(), CSRF_COOKIE_OPTIONS);
 
   await writeAuditLog({
     userId: user.id,
@@ -347,6 +369,7 @@ router.post("/logout", requireAuth, async (req: Request, res: Response) => {
   }
 
   res.clearCookie(REFRESH_COOKIE, { ...COOKIE_OPTIONS, maxAge: 0 });
+  res.clearCookie(CSRF_COOKIE, { ...CSRF_COOKIE_OPTIONS, maxAge: 0 });
 
   await writeAuditLog({
     userId: req.user!.sub,
@@ -364,6 +387,11 @@ router.post("/logout", requireAuth, async (req: Request, res: Response) => {
 // Rotates the refresh token and returns a new access token.
 // ─────────────────────────────────────────────────────────────────────────
 router.post("/refresh", async (req: Request, res: Response) => {
+  if (!hasValidCsrfToken(req)) {
+    res.status(403).json({ error: "CSRF_VALIDATION_FAILED", message: "A valid CSRF token is required" });
+    return;
+  }
+
   const rawRefreshToken = req.cookies?.[REFRESH_COOKIE];
 
   if (!rawRefreshToken) {
@@ -395,6 +423,7 @@ router.post("/refresh", async (req: Request, res: Response) => {
     res.json({ accessToken });
   } catch (err: any) {
     res.clearCookie(REFRESH_COOKIE, { ...COOKIE_OPTIONS, maxAge: 0 });
+    res.clearCookie(CSRF_COOKIE, { ...CSRF_COOKIE_OPTIONS, maxAge: 0 });
 
     const errorMap: Record<string, number> = {
       REFRESH_TOKEN_NOT_FOUND: 401,

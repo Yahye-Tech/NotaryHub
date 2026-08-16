@@ -156,6 +156,7 @@ router.get("/:id/download", requireAuth, requireMinRole("CUSTOMER"), [
     const absolutePath = await getFileUploadAbsolutePath(upload);
     await fs.access(absolutePath);
     res.setHeader("Content-Type", upload.mime_type);
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader(
       "Content-Disposition",
       `attachment; filename="${upload.original_name.replace(/"/g, "")}"`
@@ -215,8 +216,8 @@ router.post("/", requireAuth, requireMinRole("CUSTOMER"), [
 
     res.status(201).json({ message: "File uploaded", upload });
   } catch (err: any) {
-    if (err.message === "INVALID_MIME_TYPE") {
-      res.status(422).json({ error: "INVALID_MIME_TYPE", message: "Only PDF, JPG, and PNG files are allowed" });
+    if (err.message === "INVALID_MIME_TYPE" || err.message === "INVALID_FILE_CONTENT") {
+      res.status(422).json({ error: err.message, message: "The file content does not match an allowed PDF, JPG, or PNG type" });
       return;
     }
     if (err.message === "FILE_TOO_LARGE") {

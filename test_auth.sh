@@ -33,6 +33,9 @@ check() {
 get_cookie() {
   echo "$1" | grep -i "set-cookie" | grep "notaryhub_refresh" | sed 's/.*notaryhub_refresh=\([^;]*\).*/\1/'
 }
+get_csrf_cookie() {
+  echo "$1" | grep -i "set-cookie" | grep "notaryhub_csrf" | sed 's/.*notaryhub_csrf=\([^;]*\).*/\1/'
+}
 
 # ── BLOCK 1: REGISTRATION ──────────────────────────────────────────────────
 echo "=== BLOCK 1: REGISTRATION ==="
@@ -72,20 +75,23 @@ LOGIN_RESP=$(curl -si -X POST "$BASE/login" -H "Content-Type: application/json" 
   -d '{"email":"ahmed@test.local","password":"Test@2026!"}')
 LOGIN_BODY=$(echo "$LOGIN_RESP" | tail -1)
 REFRESH_COOKIE=$(get_cookie "$LOGIN_RESP")
+CSRF_COOKIE=$(get_csrf_cookie "$LOGIN_RESP")
 
 check "3a valid login returns accessToken" "$LOGIN_BODY" "accessToken"
 check "3b response contains role EMPLOYEE" "$LOGIN_BODY" "EMPLOYEE"
 check "3c httpOnly refresh cookie set in response" "$REFRESH_COOKIE" "."
+check "3d CSRF cookie set" "$CSRF_COOKIE" "."
+check "3e refresh cookie has HttpOnly/Secure/SameSite flags" "$LOGIN_RESP" "notaryhub_refresh=.*HttpOnly;.*Secure;.*SameSite=Lax"
 
 ACCESS_TOKEN=$(echo "$LOGIN_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('accessToken',''))" 2>/dev/null)
 
 R=$(curl -s -X POST "$BASE/login" -H "Content-Type: application/json" \
   -d '{"email":"ahmed@test.local","password":"Wrong@9999!"}')
-check "3d wrong password rejected" "$R" "INVALID_CREDENTIALS"
+check "3f wrong password rejected" "$R" "INVALID_CREDENTIALS"
 
 R=$(curl -s -X POST "$BASE/login" -H "Content-Type: application/json" \
   -d '{"email":"ghost@nowhere.local","password":"Test@2026!"}')
-check "3e unknown user rejected with same message (no enumeration)" "$R" "INVALID_CREDENTIALS"
+check "3g unknown user rejected with same message (no enumeration)" "$R" "INVALID_CREDENTIALS"
 
 # ── BLOCK 4: /me ───────────────────────────────────────────────────────────
 echo "=== BLOCK 4: /me - AUTHENTICATED PROFILE ==="
@@ -103,7 +109,8 @@ check "4e /me with invalid token = 401 TOKEN_INVALID" "$R" "TOKEN_INVALID"
 # ── BLOCK 5: REFRESH TOKEN ─────────────────────────────────────────────────
 echo "=== BLOCK 5: REFRESH TOKEN ==="
 REFRESH_RESP=$(curl -si -X POST "$BASE/refresh" \
-  -H "Cookie: notaryhub_refresh=$REFRESH_COOKIE")
+  -H "Cookie: notaryhub_refresh=$REFRESH_COOKIE; notaryhub_csrf=$CSRF_COOKIE" \
+  -H "X-CSRF-Token: $CSRF_COOKIE")
 REFRESH_BODY=$(echo "$REFRESH_RESP" | tail -1)
 NEW_COOKIE=$(get_cookie "$REFRESH_RESP")
 
@@ -111,11 +118,18 @@ check "5a refresh returns new accessToken" "$REFRESH_BODY" "accessToken"
 check "5b refresh rotates httpOnly cookie" "$NEW_COOKIE" "."
 
 # Reuse old (now-revoked) token — triggers reuse detection
-R=$(curl -s -X POST "$BASE/refresh" -H "Cookie: notaryhub_refresh=$REFRESH_COOKIE")
+R=$(curl -s -X POST "$BASE/refresh" \
+  -H "Cookie: notaryhub_refresh=$REFRESH_COOKIE; notaryhub_csrf=$CSRF_COOKIE" \
+  -H "X-CSRF-Token: $CSRF_COOKIE")
 check "5c reused refresh token triggers REUSE_DETECTED" "$R" "REFRESH_TOKEN"
 
-R=$(curl -s -X POST "$BASE/refresh")
+R=$(curl -s -X POST "$BASE/refresh" \
+  -H "Cookie: notaryhub_csrf=$CSRF_COOKIE" \
+  -H "X-CSRF-Token: $CSRF_COOKIE")
 check "5d no cookie at all = NO_REFRESH_TOKEN" "$R" "NO_REFRESH_TOKEN"
+
+R=$(curl -s -X POST "$BASE/refresh" -H "Cookie: notaryhub_refresh=$NEW_COOKIE")
+check "5e refresh without CSRF token is rejected" "$R" "CSRF_VALIDATION_FAILED"
 
 # ── BLOCK 6: ACCOUNT LOCKOUT ───────────────────────────────────────────────
 echo "=== BLOCK 6: ACCOUNT LOCKOUT ==="

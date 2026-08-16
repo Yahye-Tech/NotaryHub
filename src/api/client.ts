@@ -74,11 +74,18 @@ async function apiFetch<T>(
   return response.json() as Promise<T>;
 }
 
+function getCookie(name: string): string | null {
+  const match = document.cookie.split("; ").find((entry) => entry.startsWith(`${name}=`));
+  return match ? decodeURIComponent(match.slice(name.length + 1)) : null;
+}
+
 async function tryRefreshToken(): Promise<boolean> {
   try {
+    const csrfToken = getCookie("notaryhub_csrf");
     const res = await fetch("/api/auth/refresh", {
       method: "POST",
       credentials: "include",
+      headers: csrfToken ? { "X-CSRF-Token": csrfToken } : undefined,
     });
     if (!res.ok) return false;
     const data = await res.json();

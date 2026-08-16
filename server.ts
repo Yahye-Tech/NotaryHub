@@ -3,6 +3,8 @@ import path from "path";
 import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
 import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 
@@ -36,6 +38,19 @@ import { requireAuth, requireMinRole } from "./src/middleware/auth.middleware.js
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "3000", 10);
+
+// ─── Baseline security headers and API abuse protection ────────────────────
+app.use(helmet({ contentSecurityPolicy: false }));
+const apiLimiter = process.env.TEST_SKIP_RATE_LIMIT === "true"
+  ? ((_req: express.Request, _res: express.Response, next: express.NextFunction) => next())
+  : rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 300,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { error: "TOO_MANY_REQUESTS", message: "Too many API requests. Try again later." },
+    });
+app.use("/api", apiLimiter);
 
 // ─── CORS ─────────────────────────────────────────────────────────────────
 app.use(cors({
