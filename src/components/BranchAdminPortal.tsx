@@ -15,6 +15,7 @@ import { analyticsApi, BranchReport } from "../api/analytics.api";
 import { auditApi, AuditLogEntry } from "../api/settings.api";
 import { notificationsApi } from "../api/notifications.api";
 import { getAccessToken, ApiException } from "../api/client";
+import { usePortalTheme } from "../hooks/usePortalTheme";
 
 interface BranchAdminPortalProps {
   branchId?: string;
@@ -91,13 +92,7 @@ export default function BranchAdminPortal({
   const [activeTab, setActiveTab] = useState<
     "dashboard" | "customers" | "documents" | "appointments" | "queue" | "employees" | "fingerprints" | "reports" | "notifications" | "settings"
   >("dashboard");
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
-    return localStorage.getItem("portal-theme-branch-admin") === "dark";
-  });
-
-  useEffect(() => {
-    localStorage.setItem("portal-theme-branch-admin", isDarkMode ? "dark" : "light");
-  }, [isDarkMode]);
+  const [isDarkMode, setIsDarkMode] = usePortalTheme("portal-theme-branch-admin");
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [deskLoading, setDeskLoading] = useState(true);

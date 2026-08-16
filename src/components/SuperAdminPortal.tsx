@@ -14,6 +14,7 @@ import { Tenant, Branch, Employee, QueueTicket, NotaryDocument } from "../types"
 import PermissionsConfig, { PermissionsMatrix } from "./PermissionsConfig";
 import { auditApi, type AuditLogEntry } from "../api/settings.api";
 import { analyticsApi } from "../api/analytics.api";
+import { usePortalTheme } from "../hooks/usePortalTheme";
 
 type Appointment = { id: string; customerName: string; serviceType: string; appointmentTime: string; status: string };
 type MetricPoint = { label: string; value: number; change: number };
@@ -59,13 +60,7 @@ export default function SuperAdminPortal({
 }: SuperAdminPortalProps) {
   // Navigation tabs - aligned to requirements
   const [activeSubTab, setActiveSubTab] = useState<string>("dashboard");
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
-    return localStorage.getItem("portal-theme-super-admin") === "dark";
-  });
-
-  useEffect(() => {
-    localStorage.setItem("portal-theme-super-admin", isDarkMode ? "dark" : "light");
-  }, [isDarkMode]);
+  const [isDarkMode, setIsDarkMode] = usePortalTheme("portal-theme-super-admin");
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);

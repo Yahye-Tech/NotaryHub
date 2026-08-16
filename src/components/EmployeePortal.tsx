@@ -12,6 +12,7 @@ import { queueApi } from "../api/queue.api";
 import { uploadsApi } from "../api/uploads.api";
 import { getAccessToken, ApiException } from "../api/client";
 import { authApi } from "../api/auth.api";
+import { usePortalTheme } from "../hooks/usePortalTheme";
 
 interface DeskCustomer {
   id: string;
@@ -65,13 +66,7 @@ export default function EmployeePortal({
     "dashboard" | "queue" | "appointments" | "customers" | "documents" | "ai-builder" | "biometrics" | "payments" | "ai-assistant" | "settings"
   >("dashboard");
   const [newDoc, setNewDoc] = useState<{ type: string; principal: string; parties: string; title: string; content: string }>({ type: "", principal: "", parties: "", title: "", content: "" });
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
-    return localStorage.getItem("portal-theme-employee-portal") === "dark";
-  });
-
-  useEffect(() => {
-    localStorage.setItem("portal-theme-employee-portal", isDarkMode ? "dark" : "light");
-  }, [isDarkMode]);
+  const [isDarkMode, setIsDarkMode] = usePortalTheme("portal-theme-employee-portal");
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const ocrFileInputRef = useRef<HTMLInputElement>(null);

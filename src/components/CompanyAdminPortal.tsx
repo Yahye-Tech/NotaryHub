@@ -20,6 +20,7 @@ import CompanyAdminBilling from "./company/CompanyAdminBilling";
 import { settingsApi, auditApi, type AuditLogEntry } from "../api/settings.api";
 import { notificationsApi } from "../api/notifications.api";
 import { ApiException, getAccessToken } from "../api/client";
+import { usePortalTheme } from "../hooks/usePortalTheme";
 
 interface CompanyAdminPortalProps {
   tenants: Tenant[];
@@ -81,13 +82,7 @@ export default function CompanyAdminPortal({
   
   // Minimalist multi-tab selector
   const [activeTab, setActiveTab] = useState<string>("dashboard");
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
-    return localStorage.getItem("portal-theme-company-admin") === "dark";
-  });
-
-  useEffect(() => {
-    localStorage.setItem("portal-theme-company-admin", isDarkMode ? "dark" : "light");
-  }, [isDarkMode]);
+  const [isDarkMode, setIsDarkMode] = usePortalTheme("portal-theme-company-admin");
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isOnboardModalOpen, setIsOnboardModalOpen] = useState(false);
