@@ -7,6 +7,17 @@ cd "$ROOT"
 pg_isready -h 127.0.0.1 >/dev/null 2>&1 || pg_ctlcluster 16 main start >/dev/null 2>&1
 
 DATABASE_URL="${DATABASE_URL:-postgresql://notaryhub:notaryhub_dev_2026@127.0.0.1:5432/notaryhub}"
+DB_USER="${PGUSER:-notaryhub}"
+DB_NAME="${PGDATABASE:-notaryhub}"
+DB_PASSWORD="${PGPASSWORD:-notaryhub_dev_2026}"
+
+# Rebuild the auth/tenant fixture just like the other regression suites. The
+# base schema is expected to have been applied already by npm run migrate.
+PGPASSWORD="$DB_PASSWORD" psql -U "$DB_USER" -h 127.0.0.1 -d "$DB_NAME" -q \
+  -f "$ROOT/test_setup.sql"
+PGPASSWORD="$DB_PASSWORD" psql -U "$DB_USER" -h 127.0.0.1 -d "$DB_NAME" -q \
+  -f "$ROOT/src/db/schema_tenants.sql"
+echo "DB seeded."
 
 NODE_ENV=production API_ONLY=true TEST_SKIP_EMAIL_INIT=true TEST_SKIP_RATE_LIMIT=true \
   JWT_ACCESS_SECRET='upload-security-test-access-secret' JWT_REFRESH_SECRET='upload-security-test-refresh-secret' \
