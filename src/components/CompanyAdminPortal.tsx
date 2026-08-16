@@ -3,7 +3,7 @@ import {
   Building2, Users, FileText, Calendar, CreditCard, 
   Settings, RefreshCw, Sparkles, Sliders, Check, 
   HelpCircle, ChevronRight, Bell, Search, Bot, 
-  FileSpreadsheet, ToggleLeft, ToggleRight, 
+  FileSpreadsheet, 
   LayoutDashboard, UserCheck, LogOut, Menu, X,
   Trash2, Edit, Edit3, Archive, KeyRound, Play, Plus, Clock, Shield, Sun, Moon
 } from "lucide-react";
@@ -123,7 +123,6 @@ export default function CompanyAdminPortal({
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [complianceAuditLogs, setComplianceAuditLogs] = useState<AuditLogEntry[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
-  const [automaticSms, setAutomaticSms] = useState(true);
 
   // Form states inside portal
   const [branchName, setBranchName] = useState("");
@@ -1528,29 +1527,6 @@ export default function CompanyAdminPortal({
                   </div>
                 </div>
 
-                {/* Operations configuration switchboards */}
-                <div className="space-y-4 p-4 border border-slate-150 bg-slate-50/50 rounded-xl">
-                  <span className="text-[10px] font-mono font-bold text-slate-400 uppercase block tracking-wider">Dynamic switchboards</span>
-                  
-                  <div className="flex justify-between items-center py-1">
-                    <div>
-                      <span className="font-bold block text-slate-850">Twilio Automated CRM SMS notifications</span>
-                      <p className="text-[10px] text-slate-450 mt-0.5">Ping visitors via SMS when notary deeds are watermark-approved</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setAutomaticSms(!automaticSms)}
-                      className="outline-none"
-                    >
-                      {automaticSms ? (
-                        <ToggleRight className="w-8 h-8 text-blue-600 cursor-pointer" />
-                      ) : (
-                        <ToggleLeft className="w-8 h-8 text-slate-350 cursor-pointer" />
-                      )}
-                    </button>
-                  </div>
-
-                </div>
               </div>
 
               {/* Dynamic RBAC Role Permissions Control Grid — tenant-scoped, live-enforced */}
