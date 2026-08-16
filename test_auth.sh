@@ -187,6 +187,7 @@ LOGIN2_RESP=$(curl -si -X POST "$BASE/login" -H "Content-Type: application/json"
   -d '{"email":"ahmed@test.local","password":"NewPass@2026!"}')
 LOGIN2_BODY=$(echo "$LOGIN2_RESP" | tail -1)
 COOKIE2=$(get_cookie "$LOGIN2_RESP")
+CSRF2=$(get_csrf_cookie "$LOGIN2_RESP")
 AT2=$(echo "$LOGIN2_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('accessToken',''))" 2>/dev/null)
 check "8a re-login after password reset works" "$LOGIN2_BODY" "accessToken"
 
@@ -195,7 +196,9 @@ R=$(curl -s -X POST "$BASE/logout" \
   -H "Cookie: notaryhub_refresh=$COOKIE2")
 check "8b logout returns success message" "$R" "Logged out"
 
-R=$(curl -s -X POST "$BASE/refresh" -H "Cookie: notaryhub_refresh=$COOKIE2")
+R=$(curl -s -X POST "$BASE/refresh" \
+  -H "Cookie: notaryhub_refresh=$COOKIE2; notaryhub_csrf=$CSRF2" \
+  -H "X-CSRF-Token: $CSRF2")
 check "8c refresh after logout fails (token is revoked)" "$R" "REFRESH_TOKEN"
 
 # ── BLOCK 9: RBAC ENFORCEMENT ──────────────────────────────────────────────
