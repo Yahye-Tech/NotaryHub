@@ -9,7 +9,9 @@ PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
 PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
   -f /home/claude/notaryhub/src/db/schema_tenants.sql 2>/dev/null
 PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
-  -c "UPDATE platform_settings SET ai_ocr_enabled = TRUE, ai_doc_generation_enabled = TRUE WHERE id = 1;" 2>/dev/null
+  -f /home/claude/notaryhub/src/db/schema_platform_settings.sql 2>/dev/null
+PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
+  -c "UPDATE platform_settings SET ai_ocr_enabled = TRUE, ai_doc_generation_enabled = TRUE, platform_name = 'NotaryHub', branding_color = '#2563EB' WHERE id = 1;" 2>/dev/null
 echo "DB seeded."
 
 cd /home/claude/notaryhub
@@ -122,6 +124,50 @@ ROWS=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub
   "SELECT COUNT(*) FROM platform_settings;" 2>/dev/null | tr -d ' \n')
 [ "$ROWS" -eq "1" ] && { echo "  PASS: 6a exactly one platform_settings row (singleton enforced)"; PASS=$((PASS+1)); } \
                      || { echo "  FAIL: 6a exactly one platform_settings row (got $ROWS)"; FAIL=$((FAIL+1)); }
+
+echo "=== BLOCK 7: PLATFORM NAME / BRANDING COLOR (Step 16) ==="
+
+# Reset to known defaults so this block is order-independent
+PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
+  -c "UPDATE platform_settings SET platform_name = 'NotaryHub', branding_color = '#2563EB' WHERE id = 1;" 2>/dev/null
+
+R=$(curl -s "$BASE/api/platform-settings/public")
+check "7a public branding endpoint reachable without auth" "$R" "\"platformName\":\"NotaryHub\""
+check "7b public branding does not leak AI flags" "$R" "^{\"branding\":{\"platformName\":\"NotaryHub\",\"brandingColor\":\"#2563EB\"}}$"
+
+R=$(curl -s -X PATCH "$BASE/api/platform-settings" \
+  -H "Authorization: Bearer $SUPER_TOKEN" -H "Content-Type: application/json" \
+  -d '{"platformName":"Puntland Notary Group","brandingColor":"#0F766E"}')
+check "7c SUPER_ADMIN updates platform name" "$R" "\"platformName\":\"Puntland Notary Group\""
+check "7d SUPER_ADMIN updates branding color" "$R" "\"brandingColor\":\"#0F766E\""
+
+R=$(curl -s "$BASE/api/platform-settings/public")
+check "7e public endpoint reflects the update immediately" "$R" "\"platformName\":\"Puntland Notary Group\""
+check "7f public endpoint reflects updated color" "$R" "\"brandingColor\":\"#0F766E\""
+
+DB_NAME=$(PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -Atc \
+  "SELECT platform_name FROM platform_settings WHERE id = 1;" 2>/dev/null | tr -d '\n')
+[ "$DB_NAME" = "Puntland Notary Group" ] && { echo "  PASS: 7g change is actually persisted in the database"; PASS=$((PASS+1)); } \
+                                          || { echo "  FAIL: 7g change is actually persisted in the database (got '$DB_NAME')"; FAIL=$((FAIL+1)); }
+
+R=$(curl -s -X PATCH "$BASE/api/platform-settings" \
+  -H "Authorization: Bearer $SUPER_TOKEN" -H "Content-Type: application/json" \
+  -d '{"brandingColor":"not-a-hex-color"}')
+check "7h invalid hex color rejected" "$R" "VALIDATION_ERROR"
+
+R=$(curl -s -X PATCH "$BASE/api/platform-settings" \
+  -H "Authorization: Bearer $SUPER_TOKEN" -H "Content-Type: application/json" \
+  -d "{\"platformName\":\"$(python3 -c 'print("x"*61)')\"}")
+check "7i platform name over 60 chars rejected" "$R" "VALIDATION_ERROR"
+
+R=$(curl -s -X PATCH "$BASE/api/platform-settings" \
+  -H "Authorization: Bearer $BOSASO_ADMIN" -H "Content-Type: application/json" \
+  -d '{"platformName":"Hijacked Name"}')
+check "7j COMPANY_ADMIN cannot modify platform name/branding" "$R" "FORBIDDEN"
+
+# Restore defaults so a re-run (or another suite) doesn't inherit this branding
+PGPASSWORD=notaryhub_dev_2026 psql -U notaryhub -h 127.0.0.1 -d notaryhub -q \
+  -c "UPDATE platform_settings SET platform_name = 'NotaryHub', branding_color = '#2563EB' WHERE id = 1;" 2>/dev/null
 
 kill $SRV 2>/dev/null
 

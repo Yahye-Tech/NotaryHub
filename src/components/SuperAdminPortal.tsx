@@ -40,6 +40,13 @@ interface SuperAdminPortalProps {
   onLogout: () => void;
   permissionsMatrix: PermissionsMatrix;
   onUpdatePermissions: (matrix: PermissionsMatrix) => void;
+  // Real, persisted branding (platform_settings.platform_name / .branding_color).
+  // Applied live app-wide via <title> and the --brand-color CSS custom
+  // property in App.tsx — this is the only part of the settings form below
+  // that actually saves anything server-side.
+  branding: { platformName: string; brandingColor: string };
+  onSaveBranding: (updates: { platformName?: string; brandingColor?: string }) => Promise<void>;
+  brandingSaving?: boolean;
 }
 
 export default function SuperAdminPortal({
@@ -58,7 +65,10 @@ export default function SuperAdminPortal({
   featureFlagsSaving = false,
   onLogout,
   permissionsMatrix,
-  onUpdatePermissions
+  onUpdatePermissions,
+  branding,
+  onSaveBranding,
+  brandingSaving = false
 }: SuperAdminPortalProps) {
   // Navigation tabs - aligned to requirements
   const [activeSubTab, setActiveSubTab] = useState<string>("dashboard");
@@ -86,15 +96,27 @@ export default function SuperAdminPortal({
   const [alerts, setAlerts] = useState<{ id: string; message: string; date: string; read: boolean }[]>([]);
   const [showNotificationDropdown, setShowNotificationDropdown] = useState(false);
 
-  // Platform setting form values — NOTE: there is no backend endpoint yet for platform-wide
-  // branding/gateway/SMTP config (settingsApi only covers per-tenant company profiles), so
-  // these fields are local-only and the save action does not persist anything server-side.
-  const [platformName, setPlatformName] = useState("HubDev Notary SaaS");
-  const [brandingColor, setBrandingColor] = useState("#2563EB");
-  const [selectedGateway, setSelectedGateway] = useState("Stripe API Connect");
-  const [smtpServer, setSmtpServer] = useState("smtp.hubdev-ledger.io");
-  const [smtpPort, setSmtpPort] = useState("587");
+  // Platform name + branding color are real now (Step 16): persisted to
+  // platform_settings.platform_name / .branding_color, seeded from the
+  // `branding` prop (loaded via GET /api/platform-settings on SUPER_ADMIN
+  // login) and saved through onSaveBranding, which PATCHes the same real
+  // endpoint the AI feature switches use.
+  const [platformName, setPlatformName] = useState(branding.platformName);
+  const [brandingColor, setBrandingColor] = useState(branding.brandingColor);
+  useEffect(() => {
+    setPlatformName(branding.platformName);
+    setBrandingColor(branding.brandingColor);
+  }, [branding.platformName, branding.brandingColor]);
+
+  // Billing gateway provider and SMTP server config have no backend behind
+  // them at all — no gateway integration, no mail-server config route.
+  // These stay local-only and disabled; see the "Not available yet" labeling
+  // on the fields below rather than presenting them as if they save.
+  const [selectedGateway] = useState("Stripe API Connect");
+  const [smtpServer] = useState("smtp.hubdev-ledger.io");
+  const [smtpPort] = useState("587");
   const [platformSettingsSaved, setPlatformSettingsSaved] = useState(false);
+  const [platformSettingsError, setPlatformSettingsError] = useState<string | null>(null);
 
   // Real platform-wide audit log (SUPER_ADMIN sees all tenants)
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
@@ -1100,82 +1122,113 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
                 </div>
 
                 <div className="bg-white border border-slate-200 p-5 rounded-2xl relative shadow-sm">
-                  
-                  <p className="text-[10px] text-amber-600 mb-3 font-semibold">Note: there's no backend endpoint yet for platform-wide branding/gateway/SMTP settings — these fields are local to this screen only and nothing is saved server-side.</p>
 
                   {platformSettingsSaved && (
-                    <div className="p-3 bg-slate-50 border border-slate-200 text-slate-700 text-xs font-bold rounded-lg mb-4 flex items-center gap-2 animate-fade-in" id="settings-save-lbl">
-                      <CheckCircle className="w-4 h-4 text-slate-500" /> Form values updated locally — not yet persisted to a backend.
+                    <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold rounded-lg mb-4 flex items-center gap-2 animate-fade-in" id="settings-save-lbl">
+                      <CheckCircle className="w-4 h-4 text-emerald-600" /> Platform name and branding color saved — applied live across the app.
+                    </div>
+                  )}
+                  {platformSettingsError && (
+                    <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold rounded-lg mb-4 flex items-center gap-2" id="settings-save-error">
+                      <Ban className="w-4 h-4 text-rose-600" /> {platformSettingsError}
                     </div>
                   )}
 
-                  <form onSubmit={(e) => {
+                  <form onSubmit={async (e) => {
                     e.preventDefault();
-                    setPlatformSettingsSaved(true);
-                    setTimeout(() => setPlatformSettingsSaved(false), 4000);
+                    setPlatformSettingsError(null);
+                    try {
+                      await onSaveBranding({ platformName, brandingColor });
+                      setPlatformSettingsSaved(true);
+                      setTimeout(() => setPlatformSettingsSaved(false), 4000);
+                    } catch (err: any) {
+                      setPlatformSettingsError(err?.message || "Failed to save platform name / branding color.");
+                    }
                   }} className="space-y-4.5 text-xs text-slate-705">
                     
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-[10px] text-slate-500 font-mono mb-1 uppercase font-bold text-slate-400">Master Platform Banner Title</label>
-                        <input
-                          type="text"
-                          required
-                          value={platformName}
-                          onChange={(e) => setPlatformName(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-220 rounded-xl px-3 py-2 text-slate-880 outline-none focus:border-blue-500 transition hover:border-slate-350"
-                        />
+                    <div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-[10.5px] font-mono text-slate-400 uppercase font-bold tracking-wider">Platform Identity</span>
+                        <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5 uppercase tracking-wide">Live — saves for real</span>
                       </div>
-                      <div>
-                        <label className="block text-[10px] text-slate-500 font-mono mb-1 uppercase font-bold text-slate-400">Global Corporate Branding Color Hex</label>
-                        <div className="flex gap-2">
-                          <input
-                            type="color"
-                            value={brandingColor}
-                            onChange={(e) => setBrandingColor(e.target.value)}
-                            className="w-8 h-8 rounded border border-slate-200 cursor-pointer"
-                          />
+                      <p className="text-[10px] text-slate-400 mb-3">Persisted to the database and applied immediately app-wide: the browser tab title and the accent color used in the footer (and anywhere else that reads the <code>--brand-color</code> CSS variable).</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[10px] text-slate-500 font-mono mb-1 uppercase font-bold text-slate-400">Platform Name</label>
                           <input
                             type="text"
                             required
-                            value={brandingColor}
-                            onChange={(e) => setBrandingColor(e.target.value)}
-                            className="flex-1 bg-slate-50 border border-slate-220 rounded-xl px-3 py-1.5 text-slate-800 font-mono outline-none"
+                            maxLength={60}
+                            value={platformName}
+                            onChange={(e) => setPlatformName(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-220 rounded-xl px-3 py-2 text-slate-880 outline-none focus:border-blue-500 transition hover:border-slate-350"
                           />
                         </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-500 font-mono mb-1 uppercase font-bold text-slate-400">Branding Color</label>
+                          <div className="flex gap-2">
+                            <input
+                              type="color"
+                              value={brandingColor}
+                              onChange={(e) => setBrandingColor(e.target.value)}
+                              className="w-8 h-8 rounded border border-slate-200 cursor-pointer"
+                            />
+                            <input
+                              type="text"
+                              required
+                              pattern="^#[0-9a-fA-F]{6}$"
+                              title="6-digit hex color, e.g. #2563EB"
+                              value={brandingColor}
+                              onChange={(e) => setBrandingColor(e.target.value)}
+                              className="flex-1 bg-slate-50 border border-slate-220 rounded-xl px-3 py-1.5 text-slate-800 font-mono outline-none"
+                            />
+                          </div>
+                        </div>
                       </div>
+                      <button
+                        type="submit"
+                        disabled={brandingSaving}
+                        className="mt-3 px-4 py-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-[11px] font-bold rounded-lg transition"
+                      >
+                        {brandingSaving ? "Saving…" : "Save Platform Name & Color"}
+                      </button>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-[10px] text-slate-500 font-mono mb-1 uppercase font-bold text-slate-400 font-bold">Secure Billing gateway provider</label>
-                        <select 
-                          value={selectedGateway}
-                          onChange={(e) => setSelectedGateway(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-220 rounded-xl px-2.5 py-2 text-slate-800 outline-none"
-                        >
-                          <option value="Stripe API Connect">Stripe API Connect</option>
-                          <option value="Braintree Payment Pro">Braintree Payment Pro</option>
-                          <option value="Veritas Ledger Bank Wire">Veritas Ledger Bank Wire</option>
-                        </select>
+                    <div className="pt-4 border-t border-slate-100">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-[10.5px] font-mono text-slate-400 uppercase font-bold tracking-wider">Billing Gateway & Mail Server</span>
+                        <span className="text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 uppercase tracking-wide">Not available yet</span>
                       </div>
-                      <div>
-                        <label className="block text-[10px] text-slate-500 font-mono mb-1 uppercase font-bold text-slate-400">Compliance Email Server port</label>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            required
-                            value={smtpServer}
-                            onChange={(e) => setSmtpServer(e.target.value)}
-                            className="flex-1 bg-slate-50 border border-slate-220 rounded-xl px-3 py-1.5 text-slate-800 font-mono outline-none"
-                          />
-                          <input
-                            type="text"
-                            required
-                            value={smtpPort}
-                            onChange={(e) => setSmtpPort(e.target.value)}
-                            className="w-16 bg-slate-50 border border-slate-220 rounded-xl px-3 py-1.5 text-slate-800 font-mono text-center outline-none"
-                          />
+                      <p className="text-[10px] text-amber-600 mb-3 font-semibold">No payment gateway or platform-wide mail-server integration exists on the backend. These fields are disabled — nothing here is read, saved, or connected to anything.</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 opacity-60">
+                        <div>
+                          <label className="block text-[10px] text-slate-500 font-mono mb-1 uppercase font-bold text-slate-400">Billing gateway provider</label>
+                          <select
+                            disabled
+                            value={selectedGateway}
+                            className="w-full bg-slate-100 border border-slate-220 rounded-xl px-2.5 py-2 text-slate-400 outline-none cursor-not-allowed"
+                          >
+                            <option value="Stripe API Connect">Stripe API Connect</option>
+                            <option value="Braintree Payment Pro">Braintree Payment Pro</option>
+                            <option value="Veritas Ledger Bank Wire">Veritas Ledger Bank Wire</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-500 font-mono mb-1 uppercase font-bold text-slate-400">Mail server / port</label>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              disabled
+                              value={smtpServer}
+                              className="flex-1 bg-slate-100 border border-slate-220 rounded-xl px-3 py-1.5 text-slate-400 font-mono outline-none cursor-not-allowed"
+                            />
+                            <input
+                              type="text"
+                              disabled
+                              value={smtpPort}
+                              className="w-16 bg-slate-100 border border-slate-220 rounded-xl px-3 py-1.5 text-slate-400 font-mono text-center outline-none cursor-not-allowed"
+                            />
+                          </div>
                         </div>
                       </div>
                     </div>

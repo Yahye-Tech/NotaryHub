@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { body, validationResult } from "express-validator";
 import { requireAuth, requireRole } from "../middleware/auth.middleware.js";
-import { getPlatformSettings, setPlatformSettings } from "../services/platform-settings.service.js";
+import { getPlatformSettings, setPlatformSettings, getPublicBranding } from "../services/platform-settings.service.js";
 import { writeAuditLog } from "../auth/auth.service.js";
 
 const router = Router();
@@ -22,6 +22,21 @@ function getIp(req: Request): string {
   );
 }
 
+// GET /api/platform-settings/public — no auth required.
+// Returns only platformName + brandingColor so the client shell can set
+// <title> and the --brand-color CSS custom property before login. Must stay
+// ahead of any auth middleware and must never leak the AI flags or audit
+// fields that the full record below carries.
+router.get("/public", async (_req: Request, res: Response) => {
+  try {
+    const branding = await getPublicBranding();
+    res.json({ branding });
+  } catch (err: any) {
+    console.error("[PlatformSettings] Get public branding error:", err.message);
+    res.status(500).json({ error: "INTERNAL_ERROR", message: "Failed to load branding" });
+  }
+});
+
 // GET /api/platform-settings — SUPER_ADMIN only
 router.get("/", requireAuth, requireRole("SUPER_ADMIN"), async (_req: Request, res: Response) => {
   try {
@@ -41,6 +56,8 @@ router.patch(
   [
     body("aiOcrEnabled").optional().isBoolean(),
     body("aiDocGenerationEnabled").optional().isBoolean(),
+    body("platformName").optional().isString().trim().isLength({ min: 1, max: 60 }),
+    body("brandingColor").optional().isString().matches(/^#[0-9a-fA-F]{6}$/),
   ],
   async (req: Request, res: Response) => {
     if (!validate(req, res)) return;
@@ -49,6 +66,8 @@ router.patch(
         {
           aiOcrEnabled: req.body.aiOcrEnabled,
           aiDocGenerationEnabled: req.body.aiDocGenerationEnabled,
+          platformName: req.body.platformName,
+          brandingColor: req.body.brandingColor,
         },
         req.user!.sub
       );
@@ -62,6 +81,10 @@ router.patch(
 
       res.json({ message: "Platform settings updated", settings });
     } catch (err: any) {
+      if (err.code === "VALIDATION_ERROR") {
+        res.status(422).json({ error: "VALIDATION_ERROR", message: err.message });
+        return;
+      }
       console.error("[PlatformSettings] Set error:", err.message);
       res.status(500).json({ error: "INTERNAL_ERROR", message: "Failed to update platform settings" });
     }

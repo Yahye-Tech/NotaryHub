@@ -366,6 +366,27 @@ export default function SaaSDashboard() {
   const [featureFlags, setFeatureFlags] = useState({ ocr: true, docGen: true, voiceChime: true });
   const [featureFlagsSaving, setFeatureFlagsSaving] = useState(false);
 
+  // Platform name + branding color — real, persisted state (Step 16).
+  // Seeded with the same defaults the backend falls back to; overwritten by
+  // the SUPER_ADMIN-only fetch above once it resolves. The unauthenticated,
+  // app-wide copy used for pre-login <title>/CSS var lives separately in
+  // App.tsx via getPublicBranding() — this one is the editable admin copy.
+  const [branding, setBranding] = useState({ platformName: "NotaryHub", brandingColor: "#2563EB" });
+  const [brandingSaving, setBrandingSaving] = useState(false);
+
+  const handleSaveBranding = useCallback(async (updates: { platformName?: string; brandingColor?: string }) => {
+    setBrandingSaving(true);
+    try {
+      const result = await platformSettingsApi.set(updates);
+      setBranding({
+        platformName: result.settings.platformName,
+        brandingColor: result.settings.brandingColor,
+      });
+    } finally {
+      setBrandingSaving(false);
+    }
+  }, []);
+
   const handleToggleFeature = useCallback(async (flag: string) => {
     if (flag === "voiceChime") {
       setFeatureFlags(prev => ({ ...prev, voiceChime: !prev.voiceChime }));
@@ -439,7 +460,10 @@ export default function SaaSDashboard() {
       console.error("[Dashboard] Failed to load permissions matrix:", err);
     }
 
-    // Platform-wide AI feature switches — SUPER_ADMIN only, real state.
+    // Platform-wide AI feature switches, platform name, and branding color —
+    // SUPER_ADMIN only, real state (same GET /api/platform-settings call now
+    // returns all four; the name/color pair is also fetched app-wide,
+    // pre-login, via the public endpoint in App.tsx).
     if (user.role === "SUPER_ADMIN") {
       try {
         const settingsRes = await platformSettingsApi.get();
@@ -448,6 +472,10 @@ export default function SaaSDashboard() {
           ocr: settingsRes.settings.aiOcrEnabled,
           docGen: settingsRes.settings.aiDocGenerationEnabled,
         }));
+        setBranding({
+          platformName: settingsRes.settings.platformName,
+          brandingColor: settingsRes.settings.brandingColor,
+        });
       } catch (err) {
         console.error("[Dashboard] Failed to load platform settings:", err);
       }
@@ -807,6 +835,9 @@ export default function SaaSDashboard() {
             onLogout={handleLogout}
             permissionsMatrix={permissionsMatrix}
             onUpdatePermissions={setPermissionsMatrix}
+            branding={branding}
+            onSaveBranding={handleSaveBranding}
+            brandingSaving={brandingSaving}
           />
         );
 
