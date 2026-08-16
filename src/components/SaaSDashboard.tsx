@@ -6,11 +6,11 @@ import {
   CheckCircle, AlertCircle, Loader2
 } from "lucide-react";
 
-import SuperAdminPortal from "./SuperAdminPortal";
-import CompanyAdminPortal from "./CompanyAdminPortal";
-import BranchAdminPortal from "./BranchAdminPortal";
-import EmployeePortal from "./EmployeePortal";
-import CustomerPortal from "./CustomerPortal";
+const SuperAdminPortal = React.lazy(() => import("./SuperAdminPortal"));
+const CompanyAdminPortal = React.lazy(() => import("./CompanyAdminPortal"));
+const BranchAdminPortal = React.lazy(() => import("./BranchAdminPortal"));
+const EmployeePortal = React.lazy(() => import("./EmployeePortal"));
+const CustomerPortal = React.lazy(() => import("./CustomerPortal"));
 import PermissionsConfig, { PermissionsMatrix } from "./PermissionsConfig";
 
 import { authApi } from "../api/auth.api";
@@ -952,7 +952,11 @@ export default function SaaSDashboard() {
 
         {/* Main */}
         <div className="flex-1 overflow-auto p-4 sm:p-6">
-          {renderContent()}
+          <React.Suspense
+            fallback={<div className="flex min-h-64 items-center justify-center text-sm text-slate-500">Loading workspace…</div>}
+          >
+            {renderContent()}
+          </React.Suspense>
         </div>
       </div>
     </div>
