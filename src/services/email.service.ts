@@ -1,52 +1,80 @@
 import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
+import { getPlatformSettings } from "./platform-settings.service.js";
 
 let transporter: Transporter | null = null;
+let transporterKey: string | null = null;
+let developmentSmtpConfig: ResolvedSmtpConfig | null = null;
 
-/**
- * Bootstrap the mail transporter.
- * - In production: uses env SMTP_* variables.
- * - In development (no creds): auto-creates an Ethereal test account
- *   and prints the preview URL to console.
- */
-export async function initEmailService(): Promise<void> {
-  if (process.env.SMTP_USER && process.env.SMTP_PASS) {
-    transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || "smtp.ethereal.email",
-      port: parseInt(process.env.SMTP_PORT || "587", 10),
-      secure: process.env.SMTP_SECURE === "true",
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
-  } else {
-    // Dev: create a free Ethereal test account automatically
-    const testAccount = await nodemailer.createTestAccount();
-    transporter = nodemailer.createTransport({
-      host: "smtp.ethereal.email",
-      port: 587,
-      secure: false,
-      auth: {
-        user: testAccount.user,
-        pass: testAccount.pass,
-      },
-    });
-    console.log(
-      "[Email] Dev mode — Ethereal test account created.",
-      `\n  User: ${testAccount.user}`,
-      `\n  Pass: ${testAccount.pass}`,
-      `\n  Preview emails at: https://ethereal.email/messages`
-    );
-  }
-
-  await transporter.verify();
-  console.log("[Email] SMTP transporter ready.");
+interface ResolvedSmtpConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string | undefined;
 }
 
-function getTransporter(): Transporter {
-  if (!transporter) throw new Error("Email service not initialised — call initEmailService() first");
+async function resolveSmtpConfig(): Promise<ResolvedSmtpConfig> {
+  const settings = await getPlatformSettings();
+  const host = settings.smtpHost || process.env.SMTP_HOST || "smtp.ethereal.email";
+  const port = settings.smtpPort || parseInt(process.env.SMTP_PORT || "587", 10);
+  const secure = settings.smtpSecure ?? process.env.SMTP_SECURE === "true";
+  const user = settings.smtpUser || process.env.SMTP_USER || "";
+  const pass = process.env.SMTP_PASS;
+
+  if (!user || !pass) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("SMTP_NOT_CONFIGURED: set SMTP_USER and SMTP_PASS before sending production email");
+    }
+    if (!developmentSmtpConfig) {
+      const testAccount = await nodemailer.createTestAccount();
+      developmentSmtpConfig = {
+        host: "smtp.ethereal.email",
+        port: 587,
+        secure: false,
+        user: testAccount.user,
+        pass: testAccount.pass,
+      };
+      console.log(`[Email] Development Ethereal account ready for preview messages.`);
+    }
+    return developmentSmtpConfig;
+  }
+
+  return { host, port, secure, user, pass };
+}
+
+async function getTransporter(): Promise<Transporter> {
+  const config = await resolveSmtpConfig();
+  const key = JSON.stringify({
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
+    user: config.user,
+    pass: config.pass,
+  });
+
+  if (!transporter || transporterKey !== key) {
+    transporter = nodemailer.createTransport({
+      host: config.host,
+      port: config.port,
+      secure: config.secure,
+      auth: { user: config.user, pass: config.pass },
+    });
+    transporterKey = key;
+    await transporter.verify();
+    console.log(`[Email] SMTP transporter ready (${config.host}:${config.port}).`);
+  }
+
   return transporter;
+}
+
+/**
+ * Bootstrap the mail transporter. Runtime sends re-read the platform SMTP
+ * settings, so a SUPER_ADMIN change takes effect without a process restart.
+ * SMTP_PASS deliberately remains environment/secrets-manager-only.
+ */
+export async function initEmailService(): Promise<void> {
+  await getTransporter();
 }
 
 const APP_NAME = "NotaryHub";
@@ -109,7 +137,7 @@ export async function sendVerificationEmail(
     <p class="note">Or copy this URL into your browser:<br/>${link}</p>
   `;
 
-  const info = await getTransporter().sendMail({
+  const info = await (await getTransporter()).sendMail({
     from: FROM,
     to,
     subject: `[${APP_NAME}] Verify your email address`,
@@ -141,7 +169,7 @@ export async function sendPasswordResetEmail(
     <p class="note">Or copy this URL into your browser:<br/>${link}</p>
   `;
 
-  const info = await getTransporter().sendMail({
+  const info = await (await getTransporter()).sendMail({
     from: FROM,
     to,
     subject: `[${APP_NAME}] Reset your password`,
@@ -167,7 +195,7 @@ export async function sendPasswordChangedEmail(
     <p>If you did not make this change, please <a href="${APP_URL}/forgot-password">reset your password immediately</a> and contact support.</p>
   `;
 
-  await getTransporter().sendMail({
+  await (await getTransporter()).sendMail({
     from: FROM,
     to,
     subject: `[${APP_NAME}] Your password has been changed`,
@@ -189,7 +217,7 @@ export async function sendTwoFactorEnabledEmail(
     <p>If you did not enable 2FA, please contact support immediately.</p>
   `;
 
-  await getTransporter().sendMail({
+  await (await getTransporter()).sendMail({
     from: FROM,
     to,
     subject: `[${APP_NAME}] Two-factor authentication enabled`,
@@ -217,7 +245,7 @@ export async function sendNotificationEmail(
     <p class="note">You're receiving this because it's an update on your account activity.</p>
   `;
 
-  const info = await getTransporter().sendMail({
+  const info = await (await getTransporter()).sendMail({
     from: FROM,
     to,
     subject: `[${APP_NAME}] ${title}`,

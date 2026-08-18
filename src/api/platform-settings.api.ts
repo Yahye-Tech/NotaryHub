@@ -5,6 +5,11 @@ export interface PlatformSettings {
   aiDocGenerationEnabled: boolean;
   platformName: string;
   brandingColor: string;
+  smtpHost: string | null;
+  smtpPort: number | null;
+  smtpUser: string | null;
+  smtpSecure: boolean | null;
+  smtpPasswordConfigured: boolean;
   updatedBy: string | null;
   updatedAt: string;
 }
@@ -24,7 +29,11 @@ export const platformSettingsApi = {
     aiOcrEnabled: boolean;
     aiDocGenerationEnabled: boolean;
     platformName: string;
-    brandingColor: string;
+    brandingColor?: string;
+    smtpHost?: string | null;
+    smtpPort?: number | null;
+    smtpUser?: string | null;
+    smtpSecure?: boolean | null;
   }>) =>
     api.patch<{ message: string; settings: PlatformSettings }>("/api/platform-settings", updates),
 };

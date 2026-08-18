@@ -373,6 +373,14 @@ export default function SaaSDashboard() {
   // App.tsx via getPublicBranding() — this one is the editable admin copy.
   const [branding, setBranding] = useState({ platformName: "NotaryHub", brandingColor: "#2563EB" });
   const [brandingSaving, setBrandingSaving] = useState(false);
+  const [smtpSettings, setSmtpSettings] = useState({
+    smtpHost: null as string | null,
+    smtpPort: null as number | null,
+    smtpUser: null as string | null,
+    smtpSecure: null as boolean | null,
+    smtpPasswordConfigured: false,
+  });
+  const [smtpSaving, setSmtpSaving] = useState(false);
 
   const handleSaveBranding = useCallback(async (updates: { platformName?: string; brandingColor?: string }) => {
     setBrandingSaving(true);
@@ -384,6 +392,27 @@ export default function SaaSDashboard() {
       });
     } finally {
       setBrandingSaving(false);
+    }
+  }, []);
+
+  const handleSaveSmtp = useCallback(async (updates: {
+    smtpHost?: string | null;
+    smtpPort?: number | null;
+    smtpUser?: string | null;
+    smtpSecure?: boolean | null;
+  }) => {
+    setSmtpSaving(true);
+    try {
+      const result = await platformSettingsApi.set(updates);
+      setSmtpSettings({
+        smtpHost: result.settings.smtpHost,
+        smtpPort: result.settings.smtpPort,
+        smtpUser: result.settings.smtpUser,
+        smtpSecure: result.settings.smtpSecure,
+        smtpPasswordConfigured: result.settings.smtpPasswordConfigured,
+      });
+    } finally {
+      setSmtpSaving(false);
     }
   }, []);
 
@@ -475,6 +504,13 @@ export default function SaaSDashboard() {
         setBranding({
           platformName: settingsRes.settings.platformName,
           brandingColor: settingsRes.settings.brandingColor,
+        });
+        setSmtpSettings({
+          smtpHost: settingsRes.settings.smtpHost,
+          smtpPort: settingsRes.settings.smtpPort,
+          smtpUser: settingsRes.settings.smtpUser,
+          smtpSecure: settingsRes.settings.smtpSecure,
+          smtpPasswordConfigured: settingsRes.settings.smtpPasswordConfigured,
         });
       } catch (err) {
         console.error("[Dashboard] Failed to load platform settings:", err);
@@ -838,6 +874,9 @@ export default function SaaSDashboard() {
             branding={branding}
             onSaveBranding={handleSaveBranding}
             brandingSaving={brandingSaving}
+            smtpSettings={smtpSettings}
+            onSaveSmtp={handleSaveSmtp}
+            smtpSaving={smtpSaving}
           />
         );
 

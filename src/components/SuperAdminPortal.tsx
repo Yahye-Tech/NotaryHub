@@ -40,13 +40,26 @@ interface SuperAdminPortalProps {
   onLogout: () => void;
   permissionsMatrix: PermissionsMatrix;
   onUpdatePermissions: (matrix: PermissionsMatrix) => void;
-  // Real, persisted branding (platform_settings.platform_name / .branding_color).
-  // Applied live app-wide via <title> and the --brand-color CSS custom
-  // property in App.tsx — this is the only part of the settings form below
-  // that actually saves anything server-side.
+  // Real, persisted branding (platform_settings.platform_name / .branding_color)
+  // and non-secret SMTP settings. Applied through the platform-settings API;
+  // SMTP_PASS remains deployment-secret-only.
   branding: { platformName: string; brandingColor: string };
   onSaveBranding: (updates: { platformName?: string; brandingColor?: string }) => Promise<void>;
   brandingSaving?: boolean;
+  smtpSettings: {
+    smtpHost: string | null;
+    smtpPort: number | null;
+    smtpUser: string | null;
+    smtpSecure: boolean | null;
+    smtpPasswordConfigured: boolean;
+  };
+  onSaveSmtp: (updates: {
+    smtpHost?: string | null;
+    smtpPort?: number | null;
+    smtpUser?: string | null;
+    smtpSecure?: boolean | null;
+  }) => Promise<void>;
+  smtpSaving?: boolean;
 }
 
 export default function SuperAdminPortal({
@@ -68,7 +81,10 @@ export default function SuperAdminPortal({
   onUpdatePermissions,
   branding,
   onSaveBranding,
-  brandingSaving = false
+  brandingSaving = false,
+  smtpSettings,
+  onSaveSmtp,
+  smtpSaving = false
 }: SuperAdminPortalProps) {
   // Navigation tabs - aligned to requirements
   const [activeSubTab, setActiveSubTab] = useState<string>("dashboard");
@@ -108,13 +124,22 @@ export default function SuperAdminPortal({
     setBrandingColor(branding.brandingColor);
   }, [branding.platformName, branding.brandingColor]);
 
-  // Billing gateway provider and SMTP server config have no backend behind
-  // them at all — no gateway integration, no mail-server config route.
-  // These stay local-only and disabled; see the "Not available yet" labeling
-  // on the fields below rather than presenting them as if they save.
+  useEffect(() => {
+    setSmtpHost(smtpSettings.smtpHost ?? "");
+    setSmtpPort(String(smtpSettings.smtpPort ?? 587));
+    setSmtpUser(smtpSettings.smtpUser ?? "");
+    setSmtpSecure(smtpSettings.smtpSecure ?? true);
+  }, [smtpSettings.smtpHost, smtpSettings.smtpPort, smtpSettings.smtpUser, smtpSettings.smtpSecure]);
+
+  // Billing remains intentionally disabled because no payment processor exists
+  // in the backend. SMTP, by contrast, is live and persisted through the
+  // platform-settings API; SMTP_PASS is never part of this UI or database row.
   const [selectedGateway] = useState("Stripe API Connect");
-  const [smtpServer] = useState("smtp.hubdev-ledger.io");
-  const [smtpPort] = useState("587");
+  const [smtpHost, setSmtpHost] = useState(smtpSettings.smtpHost ?? "");
+  const [smtpPort, setSmtpPort] = useState(String(smtpSettings.smtpPort ?? 587));
+  const [smtpUser, setSmtpUser] = useState(smtpSettings.smtpUser ?? "");
+  const [smtpSecure, setSmtpSecure] = useState(smtpSettings.smtpSecure ?? true);
+  const [smtpSaved, setSmtpSaved] = useState(false);
   const [platformSettingsSaved, setPlatformSettingsSaved] = useState(false);
   const [platformSettingsError, setPlatformSettingsError] = useState<string | null>(null);
 
@@ -1196,40 +1221,100 @@ CURRENT SAAS PLATFORM TELEMETRY DATASET:
 
                     <div className="pt-4 border-t border-slate-100">
                       <div className="flex items-center gap-2 mb-2">
-                        <span className="text-[10.5px] font-mono text-slate-400 uppercase font-bold tracking-wider">Billing Gateway & Mail Server</span>
+                        <span className="text-[10.5px] font-mono text-slate-400 uppercase font-bold tracking-wider">SMTP Mail Server</span>
+                        <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5 uppercase tracking-wide">Live — saves for real</span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 mb-3">Verification, password-reset, and notification emails use this configuration. The SMTP password is never shown or stored here; keep it in <code>SMTP_PASS</code> or your deployment secrets manager.</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[10px] text-slate-500 font-mono mb-1 uppercase font-bold">SMTP host</label>
+                          <input
+                            type="text"
+                            maxLength={255}
+                            placeholder="smtp.example.com"
+                            value={smtpHost}
+                            onChange={(e) => setSmtpHost(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-220 rounded-xl px-3 py-1.5 text-slate-800 font-mono outline-none focus:border-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-500 font-mono mb-1 uppercase font-bold">SMTP port</label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={65535}
+                            value={smtpPort}
+                            onChange={(e) => setSmtpPort(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-220 rounded-xl px-3 py-1.5 text-slate-800 font-mono outline-none focus:border-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-500 font-mono mb-1 uppercase font-bold">SMTP username</label>
+                          <input
+                            type="text"
+                            maxLength={255}
+                            placeholder="mailer@example.com"
+                            value={smtpUser}
+                            onChange={(e) => setSmtpUser(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-220 rounded-xl px-3 py-1.5 text-slate-800 font-mono outline-none focus:border-blue-500"
+                          />
+                        </div>
+                        <div className="flex items-end justify-between gap-3">
+                          <label className="flex items-center gap-2 text-[10px] text-slate-600 font-semibold">
+                            <input type="checkbox" checked={smtpSecure} onChange={(e) => setSmtpSecure(e.target.checked)} className="rounded border-slate-300" />
+                            Use TLS/SSL
+                          </label>
+                          <span className={`text-[10px] font-semibold ${smtpSettings.smtpPasswordConfigured ? "text-emerald-600" : "text-amber-600"}`}>
+                            {smtpSettings.smtpPasswordConfigured ? "SMTP_PASS configured" : "SMTP_PASS required in environment"}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={smtpSaving}
+                        onClick={async () => {
+                          setPlatformSettingsError(null);
+                          try {
+                            const parsedPort = Number(smtpPort);
+                            if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535) {
+                              throw new Error("SMTP port must be between 1 and 65535.");
+                            }
+                            await onSaveSmtp({
+                              smtpHost: smtpHost.trim() || null,
+                              smtpPort: parsedPort,
+                              smtpUser: smtpUser.trim() || null,
+                              smtpSecure,
+                            });
+                            setSmtpSaved(true);
+                            setTimeout(() => setSmtpSaved(false), 4000);
+                          } catch (err: any) {
+                            setPlatformSettingsError(err?.message || "Failed to save SMTP settings.");
+                          }
+                        }}
+                        className="mt-3 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-40 text-white text-[11px] font-bold rounded-lg transition"
+                      >
+                        {smtpSaving ? "Saving…" : "Save SMTP Settings"}
+                      </button>
+                      {smtpSaved && <span className="ml-3 text-[10px] text-emerald-600 font-bold">SMTP settings saved and will be used for new email sends.</span>}
+                    </div>
+
+                    <div className="pt-4 border-t border-slate-100">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-[10.5px] font-mono text-slate-400 uppercase font-bold tracking-wider">Billing Gateway</span>
                         <span className="text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 uppercase tracking-wide">Not available yet</span>
                       </div>
-                      <p className="text-[10px] text-amber-600 mb-3 font-semibold">No payment gateway or platform-wide mail-server integration exists on the backend. These fields are disabled — nothing here is read, saved, or connected to anything.</p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 opacity-60">
-                        <div>
-                          <label className="block text-[10px] text-slate-500 font-mono mb-1 uppercase font-bold text-slate-400">Billing gateway provider</label>
-                          <select
-                            disabled
-                            value={selectedGateway}
-                            className="w-full bg-slate-100 border border-slate-220 rounded-xl px-2.5 py-2 text-slate-400 outline-none cursor-not-allowed"
-                          >
-                            <option value="Stripe API Connect">Stripe API Connect</option>
-                            <option value="Braintree Payment Pro">Braintree Payment Pro</option>
-                            <option value="Veritas Ledger Bank Wire">Veritas Ledger Bank Wire</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-[10px] text-slate-500 font-mono mb-1 uppercase font-bold text-slate-400">Mail server / port</label>
-                          <div className="flex gap-2">
-                            <input
-                              type="text"
-                              disabled
-                              value={smtpServer}
-                              className="flex-1 bg-slate-100 border border-slate-220 rounded-xl px-3 py-1.5 text-slate-400 font-mono outline-none cursor-not-allowed"
-                            />
-                            <input
-                              type="text"
-                              disabled
-                              value={smtpPort}
-                              className="w-16 bg-slate-100 border border-slate-220 rounded-xl px-3 py-1.5 text-slate-400 font-mono text-center outline-none cursor-not-allowed"
-                            />
-                          </div>
-                        </div>
+                      <p className="text-[10px] text-amber-600 mb-3 font-semibold">No payment processor is integrated. This remains disabled until a billing provider and business model are selected.</p>
+                      <div className="max-w-sm opacity-60">
+                        <label className="block text-[10px] text-slate-500 font-mono mb-1 uppercase font-bold text-slate-400">Billing gateway provider</label>
+                        <select
+                          disabled
+                          value={selectedGateway}
+                          className="w-full bg-slate-100 border border-slate-220 rounded-xl px-2.5 py-2 text-slate-400 outline-none cursor-not-allowed"
+                        >
+                          <option value="Stripe API Connect">Stripe API Connect</option>
+                          <option value="Braintree Payment Pro">Braintree Payment Pro</option>
+                          <option value="Veritas Ledger Bank Wire">Veritas Ledger Bank Wire</option>
+                        </select>
                       </div>
                     </div>
 

@@ -58,6 +58,10 @@ router.patch(
     body("aiDocGenerationEnabled").optional().isBoolean(),
     body("platformName").optional().isString().trim().isLength({ min: 1, max: 60 }),
     body("brandingColor").optional().isString().matches(/^#[0-9a-fA-F]{6}$/),
+    body("smtpHost").optional({ nullable: true }).isString().trim().isLength({ max: 255 }),
+    body("smtpPort").optional({ nullable: true }).isInt({ min: 1, max: 65535 }),
+    body("smtpUser").optional({ nullable: true }).isString().trim().isLength({ max: 255 }),
+    body("smtpSecure").optional({ nullable: true }).isBoolean(),
   ],
   async (req: Request, res: Response) => {
     if (!validate(req, res)) return;
@@ -68,6 +72,10 @@ router.patch(
           aiDocGenerationEnabled: req.body.aiDocGenerationEnabled,
           platformName: req.body.platformName,
           brandingColor: req.body.brandingColor,
+          smtpHost: req.body.smtpHost,
+          smtpPort: req.body.smtpPort === null ? null : (req.body.smtpPort === undefined ? undefined : Number(req.body.smtpPort)),
+          smtpUser: req.body.smtpUser,
+          smtpSecure: req.body.smtpSecure === null ? null : (req.body.smtpSecure === undefined ? undefined : req.body.smtpSecure === true || req.body.smtpSecure === "true"),
         },
         req.user!.sub
       );
