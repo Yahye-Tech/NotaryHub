@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "crypto";
-import fs from "fs/promises";
 import path from "path";
 import { query } from "../db/pool.js";
+import { getStorageAdapter } from "./storage-adapter.js";
 
 const ALLOWED_MIME_TYPES = new Set([
   "application/pdf",
@@ -54,10 +54,6 @@ export interface ListFileUploadsFilters {
   offset?: number;
 }
 
-function getUploadRoot(): string {
-  return process.env.UPLOAD_DIR ?? path.join(process.cwd(), "uploads");
-}
-
 function sanitizeFileName(name: string): string {
   const base = path.basename(name).replace(/[^a-zA-Z0-9._-]/g, "_");
   return base.slice(0, 200) || "upload.bin";
@@ -77,7 +73,7 @@ function detectMimeType(buffer: Buffer): string | null {
 }
 
 export async function ensureUploadRoot(): Promise<void> {
-  await fs.mkdir(getUploadRoot(), { recursive: true });
+  await getStorageAdapter().verify();
 }
 
 export async function getFileUploads(
@@ -167,16 +163,15 @@ export async function createFileUpload(
     throw new Error("INVALID_FILE_CONTENT");
   }
 
-  await ensureUploadRoot();
-
   const fileHash = createHash("sha256").update(buffer).digest("hex");
   const storedName = `${randomUUID()}-${sanitizeFileName(input.originalName)}`;
-  const tenantDir = path.join(getUploadRoot(), input.tenantId);
-  await fs.mkdir(tenantDir, { recursive: true });
-  const absolutePath = path.join(tenantDir, storedName);
-  const storagePath = path.relative(getUploadRoot(), absolutePath).replace(/\\/g, "/");
+  // storagePath is a logical key (tenant-scoped), not a filesystem path — the
+  // active storage adapter (local disk or S3-compatible) resolves it however
+  // is appropriate for that backend.
+  const storagePath = `${input.tenantId}/${storedName}`;
+  const storage = getStorageAdapter();
 
-  await fs.writeFile(absolutePath, buffer);
+  await storage.write(storagePath, buffer);
 
   try {
     const { rows } = await query<FileUploadRecord>(
@@ -206,7 +201,7 @@ export async function createFileUpload(
     return created ?? { ...rows[0], size_bytes: Number(rows[0].size_bytes) };
   } catch (error) {
     try {
-      await fs.unlink(absolutePath);
+      await storage.delete(storagePath);
     } catch (cleanupError) {
       console.error("[Uploads] Failed to clean up orphaned file:", cleanupError);
     }
@@ -214,15 +209,13 @@ export async function createFileUpload(
   }
 }
 
-export async function getFileUploadAbsolutePath(
-  upload: FileUploadRecord
-): Promise<string> {
-  const absolute = path.resolve(getUploadRoot(), upload.storage_path);
-  const root = path.resolve(getUploadRoot());
-  if (!absolute.startsWith(root)) {
-    throw new Error("INVALID_STORAGE_PATH");
-  }
-  return absolute;
+// Streams the file directly to the HTTP response via the active storage
+// adapter (local disk sendFile, or an S3 GetObject stream piped through).
+export async function sendFileUploadToResponse(
+  upload: FileUploadRecord,
+  res: import("express").Response
+): Promise<void> {
+  await getStorageAdapter().sendToResponse(upload.storage_path, res);
 }
 
 export async function deleteFileUpload(
@@ -244,10 +237,9 @@ export async function deleteFileUpload(
   );
 
   try {
-    const absolutePath = await getFileUploadAbsolutePath(existing);
-    await fs.unlink(absolutePath);
+    await getStorageAdapter().delete(existing.storage_path);
   } catch {
-    // File may already be missing on disk; DB record is still soft-deleted.
+    // File may already be missing from storage; DB record is still soft-deleted.
   }
 }
 

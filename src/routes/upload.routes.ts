@@ -7,11 +7,10 @@ import {
   getFileUploadById,
   createFileUpload,
   deleteFileUpload,
-  getFileUploadAbsolutePath,
+  sendFileUploadToResponse,
 } from "../services/upload.service.js";
 import { writeAuditLog } from "../auth/auth.service.js";
 import { query } from "../db/pool.js";
-import fs from "fs/promises";
 
 const router = Router();
 
@@ -153,17 +152,18 @@ router.get("/:id/download", requireAuth, requireMinRole("CUSTOMER"), [
   }
 
   try {
-    const absolutePath = await getFileUploadAbsolutePath(upload);
-    await fs.access(absolutePath);
     res.setHeader("Content-Type", upload.mime_type);
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader(
       "Content-Disposition",
       `attachment; filename="${upload.original_name.replace(/"/g, "")}"`
     );
-    res.sendFile(absolutePath);
-  } catch {
-    res.status(404).json({ error: "FILE_MISSING", message: "File not found on server" });
+    await sendFileUploadToResponse(upload, res);
+  } catch (err: any) {
+    console.error("[Uploads] Download error:", err.message);
+    if (!res.headersSent) {
+      res.status(404).json({ error: "FILE_MISSING", message: "File not found in storage" });
+    }
   }
 });
 

@@ -48,7 +48,9 @@ The minimum production configuration is shown below. Secrets must be supplied th
 | `APP_URL` | Yes | Canonical frontend/API origin used by CORS and generated links. |
 | `PORT` | No | HTTP port; defaults to `3000`. |
 | `NODE_ENV` | No | Use `production` to enable secure cookies and production serving. |
-| `UPLOAD_DIR` | No | Writable file-storage root; defaults to `./uploads`. Use a persistent volume in production. |
+| `UPLOAD_DIR` | No | Writable file-storage root; defaults to `./uploads`. Only used when `STORAGE_S3_BUCKET` is unset. Local disk works for a single, persistent server — most cloud hosting platforms wipe the filesystem on redeploy, so use S3-compatible storage below for anything beyond a single always-on VM. |
+| `STORAGE_S3_BUCKET`, `STORAGE_S3_REGION`, `STORAGE_S3_ENDPOINT`, `STORAGE_S3_ACCESS_KEY_ID`, `STORAGE_S3_SECRET_ACCESS_KEY`, `STORAGE_S3_FORCE_PATH_STYLE` | No | S3-compatible upload storage (AWS S3, Cloudflare R2, DigitalOcean Spaces, MinIO). Setting `STORAGE_S3_BUCKET` switches uploads over to this from local disk; the app verifies bucket connectivity at boot and exits in production if it fails. |
+| `TRUST_PROXY` | No | Defaults to `"1"` (trust one reverse-proxy hop) — correct for most single-proxy deployments. Set to `"false"` if running with no proxy in front. |
 | `JWT_ACCESS_EXPIRES` | No | Access-token lifetime; defaults to `15m`. |
 | `JWT_REFRESH_EXPIRES` | No | Refresh-token lifetime; defaults to `7d`. |
 | `GEMINI_API_KEY` | No | Enables the protected AI drafting, chat, and OCR endpoints. |
@@ -91,7 +93,7 @@ File uploads are validated by server-side magic bytes for PDF, JPEG, and PNG con
 
 ## Deployment
 
-Build in a clean environment with `npm ci && npm run build`. Provision PostgreSQL, set the required secrets, mount a persistent directory at `UPLOAD_DIR`, run `npm run migrate`, and start with `NODE_ENV=production npm start`. Place the service behind TLS termination and a reverse proxy that forwards the original scheme and client IP correctly. Set `APP_URL` to the public HTTPS origin, configure a restrictive CORS origin, and monitor `/api/health` plus application logs.
+Build in a clean environment with `npm ci && npm run build`. Provision PostgreSQL, set the required secrets, either mount a persistent directory at `UPLOAD_DIR` or (recommended for anything beyond a single always-on server) set `STORAGE_S3_BUCKET` and the accompanying S3 credentials, run `npm run migrate`, and start with `NODE_ENV=production npm start`. Place the service behind TLS termination and a reverse proxy that forwards the original scheme and client IP correctly — `TRUST_PROXY` defaults to trusting one hop, which matches this setup. Set `APP_URL` to the public HTTPS origin, configure a restrictive CORS origin, and monitor `/api/health` plus application logs. The process handles `SIGTERM`/`SIGINT` for a graceful shutdown (closes the HTTP server and DB pool cleanly) — orchestrators that send `SIGKILL` immediately won't get that benefit.
 
 Do not use the test switches in production. Back up PostgreSQL and the upload volume together, because the database stores upload metadata and the filesystem stores the corresponding bytes. Deploy migrations before starting application instances that depend on new tables or columns, and roll out application code only after the migration succeeds.
 

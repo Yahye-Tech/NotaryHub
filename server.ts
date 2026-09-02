@@ -16,6 +16,9 @@ import { pool } from "./src/db/pool.js";
 // ─── Email service ────────────────────────────────────────────────────────
 import { initEmailService } from "./src/services/email.service.js";
 
+// ─── File storage (uploads) ────────────────────────────────────────────────
+import { verifyStorageAdapter } from "./src/services/storage-adapter.js";
+
 // ─── Auth routes ──────────────────────────────────────────────────────────
 import authRoutes from "./src/routes/auth.routes.js";
 import tenantRoutes from "./src/routes/tenant.routes.js";
@@ -38,6 +41,24 @@ import { requireAuth, requireMinRole } from "./src/middleware/auth.middleware.js
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "3000", 10);
+
+// ─── Reverse proxy trust ────────────────────────────────────────────────────
+// Almost every real deployment sits behind a reverse proxy or load balancer
+// (nginx, Cloud Run, Render, Railway, etc.), which terminates TLS and
+// forwards the real client IP in X-Forwarded-For. Without this, express-rate-
+// limit and req.ip read the proxy's IP instead of the client's — rate limits
+// either misfire or accidentally apply to everyone behind the same proxy as
+// one bucket. TRUST_PROXY defaults to "1" (trust exactly one hop) since
+// that's correct for the overwhelming majority of single-proxy deployments;
+// set it explicitly (e.g. to a specific count, IP range, or "loopback") if
+// your topology has more hops or you're running with no proxy at all (in
+// which case set it to "false" so req.ip can't be spoofed via headers).
+const trustProxySetting = process.env.TRUST_PROXY ?? "1";
+let resolvedTrustProxy: string | number | boolean = trustProxySetting;
+if (trustProxySetting === "false") resolvedTrustProxy = false;
+else if (trustProxySetting === "true") resolvedTrustProxy = true;
+else if (/^\d+$/.test(trustProxySetting)) resolvedTrustProxy = parseInt(trustProxySetting, 10);
+app.set("trust proxy", resolvedTrustProxy);
 
 // ─── Baseline security headers and API abuse protection ────────────────────
 app.use(helmet({ contentSecurityPolicy: false }));
@@ -298,6 +319,21 @@ async function startServer() {
     }
   }
 
+  // 2b. Verify file storage (local disk or S3-compatible) is reachable and
+  // writable BEFORE accepting traffic — a broken bucket/credential config or
+  // an unwritable disk should fail loudly at boot, not on a customer's first
+  // upload. Fatal in production (uploads are core functionality for a
+  // notary platform); logged and non-fatal in dev so a misconfigured local
+  // path doesn't block iterating on unrelated work.
+  try {
+    await verifyStorageAdapter();
+  } catch (err: any) {
+    console.error("[Storage] Verification failed:", err.message);
+    if (process.env.NODE_ENV === "production") {
+      process.exit(1);
+    }
+  }
+
   // 3. Vite dev middleware or static production build
   if (process.env.API_ONLY === "true") {
     // API-only mode: no frontend serving (used in tests and CI)
@@ -321,12 +357,90 @@ async function startServer() {
     }
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  // ─── Global error handler ─────────────────────────────────────────────────
+  // Last-resort net for anything that reaches next(err) without being caught
+  // by a route's own try/catch (e.g. a thrown error in synchronous middleware,
+  // or an unforeseen gap in a handler). Without this, Express's built-in
+  // default error handler sends an HTML error page — including a stack trace
+  // in some configurations — instead of the JSON error shape every other
+  // endpoint returns, and can leak internals to the client. Registered here,
+  // after routes AND the Vite/static middleware above, since Express only
+  // routes errors to handlers registered later in the middleware stack.
+  app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error(`[UnhandledError] ${req.method} ${req.path}:`, err?.stack || err);
+    if (res.headersSent) {
+      return;
+    }
+    res.status(err?.status || 500).json({
+      error: "INTERNAL_ERROR",
+      message: process.env.NODE_ENV === "production"
+        ? "An unexpected error occurred"
+        : (err?.message || "An unexpected error occurred"),
+    });
+  });
+
+  const httpServer = app.listen(PORT, "0.0.0.0", () => {
     console.log(`[Server] NotaryHub running on http://localhost:${PORT}`);
     console.log(`[Auth]   JWT access token expiry: ${process.env.JWT_ACCESS_EXPIRES || "15m"}`);
     console.log(`[Auth]   Refresh token expiry:    ${process.env.JWT_REFRESH_EXPIRES || "7d"}`);
   });
+
+  // ─── Graceful shutdown ────────────────────────────────────────────────────
+  // Container orchestrators (Kubernetes, ECS, Cloud Run, most PaaS) send
+  // SIGTERM before killing a container during a redeploy or scale-down.
+  // Without handling it, in-flight requests get hard-cut and DB connections
+  // in the pool are dropped uncleanly instead of released properly.
+  const shutdown = (signal: string) => {
+    console.log(`[Server] ${signal} received — shutting down gracefully.`);
+    httpServer.close(async (err) => {
+      if (err) {
+        console.error("[Server] Error closing HTTP server:", err.message);
+      }
+      try {
+        await pool.end();
+        console.log("[DB] Connection pool closed.");
+      } catch (poolErr: any) {
+        console.error("[DB] Error closing connection pool:", poolErr.message);
+      }
+      process.exit(err ? 1 : 0);
+    });
+    // Failsafe: if connections won't close cleanly within 10s, force exit
+    // rather than hang indefinitely and block the orchestrator's redeploy.
+    setTimeout(() => {
+      console.error("[Server] Graceful shutdown timed out — forcing exit.");
+      process.exit(1);
+    }, 10_000).unref();
+  };
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 }
+
+// ─── Process-level crash safety net ─────────────────────────────────────────
+// These are last-resort handlers for the two ways a Node process fails
+// entirely outside Express's request/response cycle: a synchronous throw
+// with no catch anywhere in the call stack, or a rejected Promise nobody
+// attached a .catch() to. Registered at module scope (not inside
+// startServer) so they're active for the whole lifetime of the process,
+// including its startup sequence.
+//
+// uncaughtException: Node's own docs say the process is in an undefined
+// state after this and should not continue running — log what happened,
+// then exit non-zero so the process manager/orchestrator restarts it clean,
+// rather than silently continuing in a possibly-corrupted state.
+process.on("uncaughtException", (err) => {
+  console.error("[FATAL] Uncaught exception:", err.stack || err);
+  process.exit(1);
+});
+
+// unhandledRejection: usually a missed .catch() on a route-level async call
+// that was already going to fail a request anyway (Express's own promise
+// handling or the route's status code logic just won't see it). Logged so
+// it's visible instead of silently swallowed, but not treated as fatal —
+// unlike a genuinely corrupted process state, this is normally a
+// gap in one specific code path, not evidence the whole process is unsafe.
+process.on("unhandledRejection", (reason) => {
+  console.error("[UnhandledRejection]", reason);
+});
 
 startServer();
 export default app;
